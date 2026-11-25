@@ -77,31 +77,51 @@ UA 只用在两处：错误提示文案（「你的 Safari 16.2 不支持…」�
 
 ---
 
-## 5. 自定义域 DNS 检查清单（Phase 2 部署后核对）
+## 5. 自定义域配置与 DNS 检查清单（Phase 2 部署后核对）
+
+### 5.1 在哪里配（先纠正一个常见误解）
+
+** Actions 部署方式下，`CNAME` 文件不起作用。** GitHub 官方原文：
+
+> If you are publishing from a custom GitHub Actions workflow, **no `CNAME` file is created, and any existing `CNAME` file is ignored and is not required**.
+> — [GitHub Docs: Managing a custom domain](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site)
+
+我们的 `deploy-pages.yml` 用的是 `actions/deploy-pages`（自定义 Actions 工作流），所以：
+
+| 项 | 在哪配 | 说明 |
+|---|---|---|
+| 域名绑定 | GitHub 仓库 → Settings → Pages → **Custom domain** 填 `media-toolbox.lucky845.top` → Save → 勾 Enforce HTTPS | 这一步是真正生效的配置 |
+| DNS 解析 | DNS 服务商加 `CNAME` 记录：`media-toolbox` → `lucky845.github.io` | **不要**带仓库名；不要写成 `*.lucky845.top` 通配符（有域名接管风险） |
+| 仓库里的 `CNAME` 文件 | 保留也行、删掉也行，**被忽略** | 为避免误导，本项目已删除它 |
+
+若哪天改用「从分支部署」（Deploy from a branch），那条路径才会由 GitHub 在仓库根目录创建 `CNAME` 文件 —— 那时它才需要存在。
+
+### 5.2 部署后核对命令
 
 ```bash
-# 1. CNAME 记录是否生效
+# 1. CNAME 记录是否生效（可能需要 1–30 分钟）
 dig +short CNAME media-toolbox.lucky845.top
 # 期望：lucky845.github.io.
 
 # 2. 站点是否走得通（跟随重定向）
-curl -sI https://media-toolbox.lucky845.top/ | head -3
+curl -sIL https://media-toolbox.lucky845.top/ | head -6
 # 期望：HTTP/2 200（首次配置可能先 301 到 http，等证书签发）
 
-# 3. wasm 的 MIME（关键，决定 instantiateStreaming 是否可用）
-curl -sI https://media-toolbox.lucky845.top/assets/core-image-<hash>.wasm | grep -i content-type
+# 3. wasm 的 MIME（决定 instantiateStreaming 能否走第一段）
+curl -sI https://media-toolbox.lucky845.top/wasm/core_image_bg.wasm | grep -i content-type
 # 期望：content-type: application/wasm
 
 # 4. 缓存头（决定「回头客零流量」要依赖 SW 而非 HTTP 缓存）
 curl -sI https://media-toolbox.lucky845.top/ | grep -i cache-control
 # 期望或实际：cache-control: max-age=600
 
-# 5. CNAME 文件一致性（不一致会在下次部署时把自定义域冲掉）
-cat public/CNAME
+# 5. 实际页面内容
+curl -s https://media-toolbox.lucky845.top/ | grep -o '<title>[^<]*'
+# 期望：<title>本地多媒体工具箱</title>
 ```
 
 若第 1 步无输出：DNS 未生效或记录类型写成了 A/AAAA（自定义域必须用 CNAME）。
-若第 3 步不是 `application/wasm`：说明部署的不是 GitHub Pages（或中间有代理），必须依赖 loader 的降级路径。
+若第 3 步不是 `application/wasm`：说明部署的不是 GitHub Pages（或中间有代理），loader 会自动降级（并在日志里留下记录）。
 
 ---
 

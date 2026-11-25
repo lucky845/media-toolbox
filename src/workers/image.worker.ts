@@ -77,6 +77,15 @@ async function init(glueUrl: string, wasmUrl: string): Promise<void> {
   const mod = (await import(/* @vite-ignore */ glueUrl)) as Glue;
   const loaded = await loadWasmModule(wasmUrl);
   loadPath = loaded.loadPath;
+  // 回传加载路径：线上排障时能看到「走了 streaming 还是降级」，
+  // 而不需要用户打开 DevTools。日志只在本地环形缓冲，不外发。
+  send({
+    v: PROTOCOL_VERSION,
+    type: 'log',
+    taskId: 'init',
+    level: 'info',
+    message: `wasm 加载路径: ${loadPath}${loaded.contentType ? ` (content-type: ${loaded.contentType})` : ''}`,
+  });
   // 用已编译的 module 实例化（避免二次下载与二次编译）
   mod.initSync({ module: loaded.module });
   glue = mod;

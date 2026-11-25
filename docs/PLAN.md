@@ -60,19 +60,30 @@ node tests/e2e/smoke.mjs http://localhost:4173   # ✓ pass:true，0 错误 0 �
 
 ---
 
-## Phase 2 — Web 空壳上 Pages ⬜ 下一步
+## Phase 2 — Web 空壳上 Pages 🟡 本机验证完成，部署待你执行
 
-### 要改的文件
+### 已完成（本机）✅
 
 ```
-public/CNAME              # 已建（media-toolbox.lucky845.top）
-public/404.html           # 已建
-.github/workflows/deploy-pages.yml   # 已建
-README.md                 # 已含在线地址占位
+scripts/check-base.mjs              # base 注入静态检查（两种形态）
+tests/e2e/mime-fallback.mjs         # 故意返回错误 MIME，验证降级路径
+public/404.html                     # 链接改为相对路径 ./#/image
+.github/workflows/deploy-pages.yml  # VITE_BASE=/ + Actions 部署
+docs/PHASE2-CHECKLIST.md            # 完整部署与核对清单
 ```
 
-Phase 1 已经把部署的前置条件都验证了（MIME、降级加载器、hash 路由）。
-Phase 2 主要是**真实的部署链路与 DNS**。
+**已删除** `public/CNAME`（Actions 部署忽略它），并加入 `.gitignore`。
+域名只在 GitHub 仓库 Settings → Pages → Custom domain 配。
+
+本机实测：
+- 两种 base 构建都正确（`/assets/...` vs `/media-toolbox/assets/...`）
+- 错误 MIME 下图片处理仍成功（`node tests/e2e/mime-fallback.mjs`）
+- hash 路由与 404 兜底路径正确
+
+### 待你执行（部署与 DNS）
+
+见 [PHASE2-CHECKLIST.md](PHASE2-CHECKLIST.md) 第 2、3 节。
+**我不声称已 push 或部署。**
 
 ### 验收
 
@@ -103,7 +114,8 @@ git push -u origin main
 
 然后 GitHub 仓库 Settings → Pages → Source 选 **GitHub Actions**（不是 Deploy from a branch），
 Custom domain 填 `media-toolbox.lucky845.top`，勾 Enforce HTTPS。
-DNS 加一条：`CNAME  media-toolbox  lucky845.github.io`。
+DNS 加一条：`CNAME  media-toolbox  lucky845.github.io`（不带仓库名）。
+注意：Actions 部署下 **仓库里的 CNAME 文件被 GitHub 忽略**，不要再把「CNAME 文件一致性」当检查项 —— 域名只在 Settings → Pages → Custom domain 里配。
 
 ---
 

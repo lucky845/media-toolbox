@@ -51,7 +51,8 @@ jobs:
       - name: build frontend
         run: npx vite build
         env:
-          # 自定义域 → 根路径。若切回项目页，改成 /media-toolbox/ 并删掉 public/CNAME
+          # 自定义域 → 根路径。若切回项目页，改成 /media-toolbox/ 并在 Settings → Pages 里删掉自定义域。
+          # 注意：Actions 部署忽略仓库里的 CNAME 文件，域名配置只在 GitHub 仓库设置里。
           VITE_BASE: /
 
       - name: 构建期闸门（部署前必须全绿）

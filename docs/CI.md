@@ -154,7 +154,7 @@ jobs:
 +          VITE_BASE: /media-toolbox/
 ```
 ```bash
-git rm public/CNAME      # 删掉自定义域
+# 在仓库 Settings → Pages → Custom domain 里删掉自定义域（不需要动文件）
 ```
 
 其余不变（hash 路由本来就不依赖服务端）。
@@ -251,7 +251,8 @@ git push -u origin main
 ```
 类型 CNAME  主机 media-toolbox  值 lucky845.github.io   TTL 自动
 ```
-5. 首次 DNS 生效后（通常 1–30 分钟）确认 `https://media-toolbox.lucky845.top/` 能打开；`public/CNAME` 与这里必须一致，否则每次部署会把自定义域设置冲掉。
+5. 首次 DNS 生效后（通常 1–30 分钟）确认 `https://media-toolbox.lucky845.top/` 能打开。
+   **注意**：我们用 Actions 部署，GitHub 文档明确说「existing CNAME file is ignored」—— 域名**只**在 Settings → Pages → Custom domain 里配，仓库里不需要 CNAME 文件（已加入 .gitignore）。
 
 > 我不会声称这些已经做过 —— 上面是给**你**的命令清单。
 

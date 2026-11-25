@@ -27,7 +27,8 @@
         本站使用 <strong>hash 路由</strong>（形如 <code>/#/image</code>）。
         GitHub Pages 不支持 SPA rewrite，所以直接访问 <code>/image</code> 这类路径会走到这里。
       </p>
-      <p><a href="/#/image">回到图片工具</a> · <a href="/#/help">查看能力与限制</a></p>
+      <!-- 用相对路径：自定义域 base=/ 时解析为 /#/image，项目页 base=/<repo>/ 时解析为 /<repo>/#/image -->
+      <p><a href="./#/image">回到图片工具</a> · <a href="./#/help">查看能力与限制</a></p>
     </div>
   </body>
 </html>

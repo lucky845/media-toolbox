@@ -55,6 +55,8 @@ export class WebBackend implements Backend_ {
   private limitsCache: Limits | null = null;
   private capsCache: Capabilities | null = null;
   private loadPath = '';
+  /** init 阶段（无 taskId）的日志，供「能力与限制」页与排障读取 */
+  private initLogs: LogEntry[] = [];
   /** taskId → 待决任务 */
   private pending = new Map<string, PendingTask>();
   /** 探测请求的待决回调 */
@@ -202,6 +204,11 @@ export class WebBackend implements Backend_ {
         return;
       }
       case 'log': {
+        if (m.taskId === 'init') {
+          this.initLogs.push({ level: m.level, message: m.message, at: Date.now() });
+          if (this.initLogs.length > 50) this.initLogs.shift();
+          return;
+        }
         const p = this.pending.get(m.taskId);
         if (m.message.startsWith('outputName=')) {
           if (p) p.outputName = m.message.slice('outputName='.length);
@@ -471,6 +478,11 @@ export class WebBackend implements Backend_ {
   /** 本机加载路径（排障用） */
   getLoadPath(): string {
     return this.loadPath;
+  }
+
+  /** init 阶段日志（含 MIME 降级信息），不落盘不外发 */
+  getInitLogs(): LogEntry[] {
+    return [...this.initLogs];
   }
 
   dispose(): void {

@@ -206,7 +206,7 @@ Web 端「超限」= 拒绝执行 + 明确文案，**不做「先试试看」**�
 ### 5.2 base 与路由
 
 - `vite.config.ts` 里 `base: process.env.VITE_BASE ?? '/'`；当前用自定义域 → `/`。
-- 若切回项目页 `<user>.github.io/<repo>/`：设 `VITE_BASE=/<repo>/`，并把 `public/CNAME` 删掉。
+- 若切回项目页 `<user>.github.io/<repo>/`：设 `VITE_BASE=/<repo>/`，并在 GitHub Settings → Pages → Custom domain 里**删掉**自定义域（Actions 部署不依赖仓库里的 CNAME 文件）。
 - 所有资源引用走 `import.meta.env.BASE_URL`，禁止 `"/foo.wasm"` 这种绝对路径。
 - 路由用 `hash`，`public/404.html` 只作为「有人手输错路径」的兜底页（不做重定向 hack，避免与 hash 路由冲突）。
 

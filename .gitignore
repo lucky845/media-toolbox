@@ -24,6 +24,15 @@ public/fonts/*.woff2
 public/fonts/*.ttf
 public/fonts/*.otf
 
+# --- GitHub Pages 自定义域 ---
+# 用自定义 Actions 工作流部署时，GitHub 明确忽略仓库里的 CNAME 文件：
+# "If you are publishing from a custom GitHub Actions workflow, no CNAME file is
+#  created, and any existing CNAME file is ignored and is not required."
+# 域名在仓库 Settings → Pages → Custom domain 里配置，DNS 在域名服务商配置。
+# 因此本仓库不再需要 CNAME 文件（包括 dist/ 里 Vite 从 public/ 拷过去的副本）。
+CNAME
+**/CNAME
+
 # --- 系统 / 编辑器 ---
 .DS_Store
 .idea/
