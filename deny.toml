@@ -11,8 +11,8 @@
 #   - r-efi 是 MIT OR Apache-2.0 OR LGPL-2.1-or-later（三选一），
 #     我们走 MIT 分支，LGPL 不适用；桌面 FFmpeg 的 LGPL 是 sidecar
 #     二进制，不在 Cargo 依赖树内，另行在 THIRD_PARTY_NOTICES 说明。
-#   - 斜杠表达式（BSD-3-Clause/MIT、MIT/Apache-2.0）是 OR 关系，
-#     只要其中一支被允许即可通过。
+#   - 斜杠表达式（BSD-3-Clause/MIT、MIT/Apache-2.0）不是合法 SPDX，
+#     用下方 [[licenses.clarify]] 给出等价的合法 SPDX 表达式。
 #
 # 任何新增 GPL/AGPL/SSPL/BUSL 依赖都会让本检查失败，必须显式裁决并
 # 同步更新 THIRD_PARTY_NOTICES.md 才能加入白名单。
@@ -23,20 +23,45 @@ confidence-threshold = 0.8
 allow = [
     "0BSD",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "BSD-3-Clause/MIT",
     "CC0-1.0",
-    "ISC",
-    "LLVM-exception",
     "MIT",
     "MIT-0",
-    "MIT/Apache-2.0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Zlib",
 ]
 
-# 不使用任何 exception：有争议的依赖必须走白名单裁决，不能靠例外放行。
+# 不使用按 crate 静默放行的 exception：有争议的依赖必须走 clarify 给出
+# 合法 SPDX 表达式，再靠上面的 allow 白名单裁决。
 exceptions = []
+
+# 少数 crate 用非标准斜杠写法声明 dual-license（如 "MIT/Apache-2.0"、
+# "BSD-3-Clause/MIT"），cargo-deny 无法直接匹配 allow 列表。clarify 用
+# 其源码里真实的 LICENSE 文件为来源，声明等价的 OR 表达式。
+[[licenses.clarify]]
+crate = "brotli-decompressor"
+expression = "MIT OR BSD-3-Clause"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "core_detect"
+expression = "MIT OR Apache-2.0"
+license-files = [{ path = "LICENSE-MIT", hash = 0 }, { path = "LICENSE-APACHE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "quick-error"
+expression = "MIT OR Apache-2.0"
+license-files = [{ path = "LICENSE-MIT", hash = 0 }, { path = "LICENSE-APACHE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "rangemap"
+expression = "MIT OR Apache-2.0"
+license-files = [{ path = "LICENSE-MIT", hash = 0 }, { path = "LICENSE-APACHE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "stringprep"
+expression = "MIT OR Apache-2.0"
+license-files = [{ path = "LICENSE-MIT", hash = 0 }, { path = "LICENSE-APACHE", hash = 0 }]
