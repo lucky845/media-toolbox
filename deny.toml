@@ -1,0 +1,42 @@
+# cargo-deny 许可证白名单
+#
+# 背景：CI 的 cargo-deny-action 执行 `check licenses`。没有本文件时 cargo-deny
+# 用默认配置，会把 `zune-jpeg = MIT OR Apache-2.0 OR Zlib` 判为
+# "license is not explicitly allowed"（见 run 45613846976 日志）。
+#
+# 这里逐条列出依赖树中实际出现的许可证（用
+#   cargo metadata --format-version 1 --all-features
+# 收集确认）。全部是宽松许可或公有领域，符合「个人开源免费工具、
+# 不得引入 GPL/AGPL 到 Rust 依赖树」的立场：
+#   - r-efi 是 MIT OR Apache-2.0 OR LGPL-2.1-or-later（三选一），
+#     我们走 MIT 分支，LGPL 不适用；桌面 FFmpeg 的 LGPL 是 sidecar
+#     二进制，不在 Cargo 依赖树内，另行在 THIRD_PARTY_NOTICES 说明。
+#   - 斜杠表达式（BSD-3-Clause/MIT、MIT/Apache-2.0）是 OR 关系，
+#     只要其中一支被允许即可通过。
+#
+# 任何新增 GPL/AGPL/SSPL/BUSL 依赖都会让本检查失败，必须显式裁决并
+# 同步更新 THIRD_PARTY_NOTICES.md 才能加入白名单。
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSD-3-Clause/MIT",
+    "CC0-1.0",
+    "ISC",
+    "LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "MIT/Apache-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+
+# 不使用任何 exception：有争议的依赖必须走白名单裁决，不能靠例外放行。
+exceptions = []
