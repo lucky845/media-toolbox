@@ -120,7 +120,9 @@ jobs:
       - run: npm ci
       - name: npm 许可证白名单
         run: |
-          npx --yes license-checker-rseidelsohn --production \
+          # 根包 private:true 会被报成 UNLICENSED 并被 --onlyAllow 拒绝，
+          # 它不是我们分发的组件，排除即可（本地已验证退出码 0）。
+          npx --yes license-checker-rseidelsohn --production --excludePrivatePackages \
             --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;Unlicense;MPL-2.0;BlueOak-1.0.0"
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:

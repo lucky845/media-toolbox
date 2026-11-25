@@ -2,11 +2,11 @@ import { useEffect } from 'react';
 import { useCapabilities } from '../store/capabilities';
 
 const NAV = [
-  { href: '#/image', label: 'image' },
-  { href: '#/pdf', label: 'pdf' },
-  { href: '#/video', label: 'video' },
-  { href: '#/documents', label: 'documents' },
-  { href: '#/help', label: 'limits' },
+  { href: '#/image', label: '图片' },
+  { href: '#/pdf', label: 'PDF' },
+  { href: '#/video', label: '视频' },
+  { href: '#/documents', label: '文档' },
+  { href: '#/help', label: '能力与限制' },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -39,12 +39,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </a>
           ))}
         </nav>
-        {status === 'loading' && <span className="badge">/ detecting…</span>}
+      </header>
+
+      {/* 形态状态属于内容信息，不挤占顶栏导航空间 */}
+      <div className="status-strip" aria-live="polite">
+        {status === 'loading' && <span className="badge">/ 正在探测能力…</span>}
         {status === 'ready' && summary && (
           <span className={`badge ${summary.tone}`}>{summary.label}</span>
         )}
-        {status === 'failed' && <span className="badge err">/ caps error</span>}
-      </header>
+        {status === 'failed' && <span className="badge err">/ 能力探测失败</span>}
+      </div>
 
       {status === 'failed' && (
         <div style={{ padding: '16px clamp(1.5rem, 6vw, 5rem) 0' }}>
