@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+page.on('console', (m) => console.log('[console]', m.type(), m.text()));
+page.on('pageerror', (e) => console.log('[pageerror]', e.message, e.stack?.split('\n').slice(0,4).join('\n')));
+page.on('requestfailed', (r) => console.log('[reqfail]', r.url(), r.failure()?.errorText));
+await page.goto('http://localhost:4173/#/image', { waitUntil: 'networkidle' });
+await page.waitForTimeout(2000);
+console.log('--- body ---');
+console.log((await page.locator('body').innerText()).slice(0, 600));
+await browser.close();

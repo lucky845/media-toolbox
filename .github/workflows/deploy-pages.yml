@@ -1,0 +1,77 @@
+name: deploy-pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pages-wasm-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install wasm-bindgen-cli
+        run: |
+          VERSION=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep version | head -1 | sed 's/.*"\(.*\)"/\1/')
+          cargo install wasm-bindgen-cli --version "$VERSION" --locked
+
+      - run: npm ci
+
+      - name: build wasm
+        run: |
+          npm i -D binaryen@^123
+          node scripts/build-wasm.mjs
+          mkdir -p public/wasm
+          cp crates/wasm/pkg/core_image.js public/wasm/
+          cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
+
+      - name: build frontend
+        run: npx vite build
+        env:
+          # 自定义域 → 根路径。若切回项目页，改成 /media-toolbox/ 并删掉 public/CNAME
+          VITE_BASE: /
+
+      - name: 构建期闸门（部署前必须全绿）
+        run: |
+          node scripts/check-external-domains.mjs
+          node scripts/check-no-branching.mjs
+          node scripts/check-budget.mjs
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

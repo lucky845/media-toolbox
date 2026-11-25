@@ -1,0 +1,4 @@
+# 本项目是个人开源工具站，允许索引。
+# 无 sitemap：内容极少且是单页 hash 路由，sitemap 没有意义。
+User-agent: *
+Allow: /

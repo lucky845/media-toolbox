@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/ports", "crates/core", "crates/wasm", "crates/native"]
+exclude = ["src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.82"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+
+# 体积优先：wasm 与 native 共用同一套 opt-level
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

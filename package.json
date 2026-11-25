@@ -1,0 +1,46 @@
+{
+  "name": "media-toolbox",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "本地多媒体与文档处理工具箱：一套核心，Web(wasm) 与 Tauri(native) 两个壳",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:only": "vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "wasm": "node scripts/build-wasm.mjs",
+    "wasm:opt": "node scripts/build-wasm.mjs --opt",
+    "verify:single-source": "node scripts/verify-single-source.mjs",
+    "verify:conformance": "node scripts/run-conformance.mjs",
+    "check:budget": "node scripts/check-budget.mjs",
+    "check:domains": "node scripts/check-external-domains.mjs",
+    "check:core": "node scripts/check-core-boundary.mjs",
+    "check:branching": "node scripts/check-no-branching.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@types/node": "^26.6.10",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "playwright": "^1.65.1",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "optionalDependencies": {
+    "@tauri-apps/cli": "^2.12.6"
+  }
+}

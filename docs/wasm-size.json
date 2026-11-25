@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-11-25T10:32:54.949Z",
+  "note": "由 scripts/build-wasm.mjs 生成；docs/BUDGET.md 的 [待测] 项以此为准",
+  "packages": [
+    {
+      "pkg": "core_image",
+      "feature": "image",
+      "raw": 1283890,
+      "gzip": 399058,
+      "brotli": 313934,
+      "optApplied": false
+    }
+  ]
+}

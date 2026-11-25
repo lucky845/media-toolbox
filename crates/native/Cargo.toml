@@ -1,0 +1,19 @@
+[package]
+name = "media-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "native 薄包装：rayon 并行、文件 IO、子进程；被 src-tauri 调用"
+
+[dependencies]
+media-core = { path = "../core" }
+media-ports = { path = "../ports" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dependencies.rayon]
+version = "1.12"
+
+[dev-dependencies]
+tempfile = "3"

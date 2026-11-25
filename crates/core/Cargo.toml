@@ -1,0 +1,38 @@
+[package]
+name = "media-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "纯算法层：图片/色彩/PDF/视频参数，只处理字节与参数结构，不碰 IO/并行/进程"
+
+[dependencies]
+media-ports = { path = "../ports" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 纯 Rust、wasm32 可用、无 C 依赖的哈希，用于两端一致性比对与缓存键。
+[dependencies.blake3]
+version = "1.8"
+default-features = false
+features = ["std"]
+
+# 默认特性刻意裁剪：image 的 default features 会带上多余的编码器。
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["jpeg", "png", "gif", "bmp", "tiff", "webp"]
+
+[dependencies.kamadak-exif]
+version = "0.6"
+optional = true
+
+[features]
+default = ["exif"]
+# EXIF 方向读取与元数据剥离
+exif = ["dep:kamadak-exif"]
+# PNG 无损优化（oxipng）。默认关闭：wasm 体积 +0.3~0.6 MB br，Phase 1 实测后再定。
+png-optimize = []
+
+[dev-dependencies]
+tempfile = "3"

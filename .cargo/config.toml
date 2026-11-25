@@ -1,0 +1,6 @@
+# 项目级配置：wasm32 不启用 threads/atomics（GitHub Pages 无 COOP/COEP）
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+bulk-memory,+mutable-globals"]
+
+[net]
+git-fetch-with-cli = true

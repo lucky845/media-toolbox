@@ -1,0 +1,29 @@
+[package]
+name = "media-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "wasm-bindgen 薄包装：把 core 暴露给浏览器 Worker，单线程"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+media-core = { path = "../core" }
+media-ports = { path = "../ports" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dependencies.wasm-bindgen]
+version = "0.2.130"
+
+[dependencies.js-sys]
+version = "0.3"
+
+[features]
+default = ["image"]
+# 按功能分包：Web 端只在进入对应功能区时加载对应的 wasm。
+image = []
+doc = []
+video = []

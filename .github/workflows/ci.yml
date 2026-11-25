@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: rust (native tests + wasm32 build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-v1
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test (native, 含 core 全部算法单测)
+        run: cargo test --workspace --release
+
+      - name: build wasm (image feature)
+        run: cargo build --release -p media-wasm --target wasm32-unknown-unknown --no-default-features --features image
+
+      - name: core 边界检查（无 rayon/fs/net/thread）
+        run: node scripts/check-core-boundary.mjs
+
+  web:
+    name: web (typecheck + build + 闸门)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-v1
+
+      - name: install wasm-bindgen-cli（版本必须与 crate 依赖一致）
+        run: |
+          VERSION=$(grep -A1 'name = "wasm-bindgen"' Cargo.lock | grep version | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "wasm-bindgen crate version: $VERSION"
+          cargo install wasm-bindgen-cli --version "$VERSION" --locked
+
+      - run: npm ci
+
+      - run: npx tsc --noEmit
+
+      - run: npx vitest run
+
+      - name: build wasm (含 wasm-opt)
+        run: |
+          npm i -D binaryen@^123
+          node scripts/build-wasm.mjs
+
+      - name: copy wasm into public/（CI 构建期生成，不进仓库）
+        run: |
+          mkdir -p public/wasm
+          cp crates/wasm/pkg/core_image.js public/wasm/
+          cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
+
+      - run: npx vite build
+
+      - name: 外部域名扫描
+        run: node scripts/check-external-domains.mjs
+
+      - name: 前端分叉检查
+        run: node scripts/check-no-branching.mjs
+
+      - name: 体积预算
+        run: node scripts/check-budget.mjs
+
+      - name: 上传体积报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size
+          path: docs/wasm-size.json
+          if-no-files-found: warn
+
+  licenses:
+    name: license scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: npm 许可证白名单
+        run: |
+          npx --yes license-checker-rseidelsohn --production \
+            --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;Unlicense;MPL-2.0;BlueOak-1.0.0"
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+          arguments: --all-features
+      - name: 可选 GPL 组件的声明必须存在
+        run: node scripts/check-notices.mjs

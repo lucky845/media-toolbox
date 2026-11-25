@@ -1,0 +1,33 @@
+# --- Rust ---
+target/
+**/target/
+Cargo.lock.bak
+
+# --- 前端 ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# --- wasm 产物（CI 构建期生成，不进仓库）---
+crates/wasm/pkg/
+*.wasm
+*.wasm.br
+*.wasm.gz
+
+# --- 桌面 sidecar 二进制（构建期拉取，不进仓库）---
+src-tauri/sidecar/**/*
+!src-tauri/sidecar/README.md
+
+# --- 字体产物（构建期子集化生成）---
+public/fonts/*.woff2
+public/fonts/*.ttf
+public/fonts/*.otf
+
+# --- 系统 / 编辑器 ---
+.DS_Store
+.idea/
+.vscode/
+*.log
+.env
+.env.local

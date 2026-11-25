@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"主窗口的最小权限集。注意：没有 fs 通配权限 —— 文件访问一律通过我们的 command，由用户显式选择路径。","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-save"]}}

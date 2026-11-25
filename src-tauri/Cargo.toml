@@ -1,0 +1,37 @@
+[package]
+name = "media-toolbox-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "本地多媒体工具箱桌面版"
+
+[lib]
+name = "media_toolbox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "rt-multi-thread"] }
+
+media-core = { path = "../crates/core" }
+media-ports = { path = "../crates/ports" }
+media-native = { path = "../crates/native" }
+
+[features]
+# 桌面版能力全量。AVIF 编码在 Phase 3 加入（需要 ravif，体积 +1.5–2 MB，不进 wasm）。
+default = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
