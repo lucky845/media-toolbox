@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { getBackend } from '../lib/backend';
+import { recordTask } from './recent';
 import type {
   EncodeOptions,
   ImageParams,
@@ -151,6 +152,18 @@ export const useQueue = create<QueueState>((set, get) => ({
             : i,
         ),
       }));
+      // 最近任务：只存文件名与参数，不存内容
+      void recordTask({
+        id,
+        createdAt: Date.now(),
+        kind: 'image.process',
+        fileNames: [item.input.name],
+        params: item.params,
+        paramsHash: result.meta.outputHash,
+        outcome: 'succeeded',
+        inputBytes: result.meta.inputBytes,
+        outputBytes: result.meta.outputBytes,
+      });
     } catch (e) {
       const err = e as ToolError;
       const cancelled = err?.code === 'CANCELLED';
@@ -166,6 +179,16 @@ export const useQueue = create<QueueState>((set, get) => ({
             : i,
         ),
       }));
+      void recordTask({
+        id,
+        createdAt: Date.now(),
+        kind: 'image.process',
+        fileNames: [item.input.name],
+        params: item.params,
+        paramsHash: '',
+        outcome: cancelled ? 'cancelled' : 'failed',
+        errorCode: cancelled ? undefined : (err as ToolError)?.code,
+      });
     } finally {
       get().controllers.delete(id);
       // 推进下一个

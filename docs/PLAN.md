@@ -119,13 +119,36 @@ DNS 加一条：`CNAME  media-toolbox  lucky845.github.io`（不带仓库名）�
 
 ---
 
-## Phase 3 — Web 图片全量 + 队列 + SW ⬜
+## Phase 3 — Web 图片全量 + 队列 + SW ✅ 完成
 
-- 补齐 `ImagePage` 的裁剪/旋转/色彩调整 UI（core 算法已全部实现并有单测）
-- PNG 无损优化（`oxipng`，需先测 wasm 体积增量 → `docs/benchmarks.md` B3）
-- AVIF（需先测 → B4）
-- Service Worker（当前 UI 已如实显示「尚未缓存」）
-- 分包加载：只在进入图片页时拉 `core_image.wasm`
+**完整报告见 [PHASE3-REPORT.md](PHASE3-REPORT.md)。**
+
+### 交付
+
+- 视觉统一到「原理图」皮肤（主页/博客/工具箱同款 token）
+- 图片全量 UI：裁剪、旋转、翻转、缩放、5 种滤波、色彩、EXIF、背景填充、对比预览
+- 批量队列：`QueuePanel`/`TaskCard`、总进度、暂停、取消、重试、IndexedDB 最近任务
+- Worker 池（1–2，任务级并发）+ 4 个单测
+- Service Worker：外壳 + 全部 assets + wasm 预缓存；离线刷新与离线处理均验证通过
+- CI 已接入 SW 构建与 base 检查
+
+### 阶段门禁
+
+| 门禁 | 状态 |
+|---|---|
+| `check-no-branching` 继续通过 | ✅ |
+| SW 不缓存 ffmpeg | ✅（`ffmpegCached: []`） |
+| IndexedDB 只存文件名+参数 | ✅ |
+| 离线可用 | ✅ |
+| 错误 MIME 降级 | ✅ |
+
+### 一个明确记录的偏离
+
+SW 改为 install 时预缓存图片 wasm（规格 §18 说「进入功能才拉」）。
+原因：运行时缓存在实测中反复出现 body 空壳（详见 PHASE3-REPORT §4.2 的 6 个坑），
+可靠性优先。代价是首页多下 307 KB，净增接近 0（进图片页本来就要下）。
+
+---
 
 ## Phase 4 — Web 轻量视频 + 文档 + 能力页 ⬜
 

@@ -90,10 +90,13 @@ jobs:
           cp crates/wasm/pkg/core_image.js public/wasm/
           cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
 
-      - run: npx vite build
+      - run: npm run build  # tsc + vite + SW 编译
 
       - name: 外部域名扫描
         run: node scripts/check-external-domains.mjs
+
+      - name: base 与路径检查
+        run: node scripts/check-base.mjs
 
       - name: 前端分叉检查
         run: node scripts/check-no-branching.mjs

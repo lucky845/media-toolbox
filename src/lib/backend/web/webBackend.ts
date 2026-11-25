@@ -5,6 +5,7 @@
 //  - 保留一个「空闲 worker」复用，减少每次任务的 30–80 ms 启动开销。
 //  - 所有 URL 都经 `import.meta.env.BASE_URL` 拼接（规格 §16）。
 
+import { warmWasm } from './wasmLoader';
 import {
   PROTOCOL_VERSION,
   isTerminal,
@@ -94,6 +95,9 @@ export class WebBackend implements Backend_ {
     };
 
     const { glue, wasm } = wasmUrls();
+    // 预热：让 SW 缓存 wasm 与胶水（离线可用）；不阻塞 worker init
+    void warmWasm(wasm);
+    void warmWasm(glue);
     const initMsg: ToWorker = { v: PROTOCOL_VERSION, type: 'init', glueUrl: glue, wasmUrl: wasm };
     w.postMessage(initMsg);
 

@@ -1,0 +1,19 @@
+{
+  "name": "本地多媒体工具箱",
+  "short_name": "媒体工具箱",
+  "description": "浏览器内完成图片、PDF、视频处理。文件不上传，全部在本机计算。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0C1216",
+  "theme_color": "#0C1216",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icons/favicon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -2,11 +2,11 @@ import { useEffect } from 'react';
 import { useCapabilities } from '../store/capabilities';
 
 const NAV = [
-  { href: '#/image', label: '图片' },
-  { href: '#/pdf', label: 'PDF' },
-  { href: '#/video', label: '视频' },
-  { href: '#/documents', label: '文档' },
-  { href: '#/help', label: '能力与限制' },
+  { href: '#/image', label: 'image' },
+  { href: '#/pdf', label: 'pdf' },
+  { href: '#/video', label: 'video' },
+  { href: '#/documents', label: 'documents' },
+  { href: '#/help', label: 'limits' },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -20,9 +20,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="layout">
+      {/* 图纸装订边（≥1280px 显示，与主页一致） */}
+      <div className="ruler" aria-hidden="true" />
+
       <header className="topbar">
-        <span className="brand">本地多媒体工具箱</span>
-        <nav className="nav">
+        <a className="brand" href="#/image" aria-label="本地多媒体工具箱首页">
+          media-toolbox
+        </a>
+        <span className="brand-sub">/ LOCAL MEDIA LAB</span>
+        <nav className="nav" aria-label="主要导航">
           {NAV.map((n) => (
             <a
               key={n.href}
@@ -33,33 +39,40 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </a>
           ))}
         </nav>
-        <span className="grow" />
-        {status === 'loading' && <span className="badge">探测能力中…</span>}
+        {status === 'loading' && <span className="badge">/ detecting…</span>}
         {status === 'ready' && summary && (
           <span className={`badge ${summary.tone}`}>{summary.label}</span>
         )}
-        {status === 'failed' && <span className="badge err">能力探测失败</span>}
+        {status === 'failed' && <span className="badge err">/ caps error</span>}
       </header>
 
       {status === 'failed' && (
-        <div style={{ maxWidth: 1080, margin: '16px auto 0', padding: '0 22px' }}>
+        <div style={{ padding: '16px clamp(1.5rem, 6vw, 5rem) 0' }}>
           <div className="notice danger">
-            <span>⚠</span>
+            <span aria-hidden="true">✕</span>
             <div>
               <strong>核心模块未能加载，已进入受限模式。</strong>
               <div className="hint" style={{ marginTop: 4 }}>
                 {error?.message ?? '未知原因'}
-                {error?.detail && <div className="mono" style={{ marginTop: 4 }}>{error.detail}</div>}
+                {error?.detail && (
+                  <div className="mono" style={{ marginTop: 4 }}>{error.detail}</div>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      <main>{children}</main>
+      <main>
+        {/* 角上的十字定位记号（与主页 .reg 一致） */}
+        <span className="reg reg-tl" aria-hidden="true" style={{ left: '6vw', top: '1.4rem' }} />
+        {children}
+      </main>
 
       <footer className="footer">
         所有处理都在你的设备上完成，文件不会上传。在线版仅分发代码，但仓库与构建产物是公开的。
+        <br />
+        <span className="mono">lucky845 / media-toolbox — schematic sheet</span>
       </footer>
     </div>
   );

@@ -41,7 +41,7 @@ node scripts/build-wasm.mjs          # cargo → wasm-bindgen → 体积报告
 mkdir -p public/wasm
 cp crates/wasm/pkg/core_image.js public/wasm/
 cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
-npm run build                        # 产出 dist/
+npm run build                        # tsc + vite + SW 编译 → dist/
 
 # 二选一启动静态服务：
 npm run preview                      # 推荐：Vite 会给 .wasm 正确的 MIME
@@ -72,15 +72,15 @@ cargo tauri build --target aarch64-apple-darwin
 
 | 能力 | 在线版 | 桌面版 | 在线版为什么是这样 |
 |---|---|---|---|
-| 图片 压缩/裁剪/旋转/翻转/亮度对比度饱和度/缩放/EXIF 方向 | ✅ ≤20 MP、≤20 MB | ✅ 大图、批量、rayon 并行 | 单线程 wasm + Worker；取消是「终止线程」级 |
+| 图片 压缩/裁剪/旋转/翻转/亮度对比度饱和度/缩放/EXIF 方向 | ✅ ≤20 MP、≤20 MB | ✅ 大图、批量、rayon 并行 | 全部已实现（Phase 3）；单线程 wasm + Worker |
 | 图片 格式转换 | ✅ jpeg/png/webp/gif/bmp/tiff | ✅ 加 AVIF | AVIF 编码库（ravif）约 +1.5–2 MB，Web 默认关闭 |
 | 视频 压缩/格式转换 | ⚠️ 仅轻量，≤200 MB、≤5 分钟 | ✅ 全格式、硬件编码 | 无 COOP/COEP → 单线程；编解码器由浏览器决定 |
 | 视频 元数据/首帧 | ✅ 轻量解析 | ✅ ffprobe | — |
 | PDF → 图片 | ✅ ≤100 页 | ✅ 全页数、高 DPI | pdf.js 按页渲染 + 虚拟化 |
 | PDF 合并/拆分/旋转/提取 | ✅ | ✅ | Rust `lopdf`，两端同一份 |
 | PDF → Word / Word → PDF | ⚠️ 仅结构化 | ✅ LibreOffice 优先 + 结构化兜底 | 浏览器内没有 LibreOffice |
-| 批量队列 | ⚠️ 1–2 Worker | ✅ rayon + 子进程池 | 同上（无多线程） |
-| 离线 | ⚠️ 首次加载后（Phase 3 启用 SW） | ✅ 完全离线 | — |
+| 批量队列 | ✅ 1–2 Worker + 总进度/取消/重试 | ✅ rayon + 子进程池 | 队列级暂停；running 只能取消 |
+| 离线 | ✅ 首次加载后由 SW 缓存（已实现） | ✅ 完全离线 | 外壳 + wasm 分包预缓存；绝不缓存可选 ffmpeg 包 |
 | 大文件 | ❌ 超限中止 + 桌面版引导 | ✅ 流式 | wasm 32 位内存上限 + 峰值内存模型 |
 
 完整的逐项说明（含每个 ⚠️ 的具体原因）见站内「能力与限制」页与 [docs/CAPABILITIES.md](docs/CAPABILITIES.md)。

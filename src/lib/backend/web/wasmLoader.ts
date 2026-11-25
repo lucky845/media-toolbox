@@ -107,6 +107,27 @@ export async function loadWasmModule(url: string): Promise<LoadResult> {
   }
 }
 
+/**
+ * 确保 wasm 分包已被 Service Worker 缓存。
+ *
+ * 为什么需要显式调用：Worker 里的 `import(glueUrl)` 与 `fetch(wasmUrl)` 不一定
+ * 经过页面 SW（实测：缓存里只有外壳，没有 wasm/glue）。所以**在主线程**、用户进入
+ * 图片功能时主动拉一次，走 SW 的 fetch 事件，把分包纳入缓存 ——
+ * 这正是规格 §18「进入对应功能时才拉对应 wasm」的落点。
+ *
+ * 幂等：已缓存时浏览器直接命中 SW 缓存，0 流量。
+ */
+export async function warmWasm(url: string): Promise<void> {
+  try {
+    // 不读 body：让 SW 的 fetch 事件自己 clone 并缓存完整响应。
+    // 早期版本在这里 `await res.arrayBuffer()`，主线程消费 body 后，
+    // SW 缓存里的响应体变成空壳（bodyLen=0），离线动态 import 直接失败。
+    await fetch(url);
+  } catch {
+    // 预热失败不阻塞功能；worker 会直接 fetch
+  }
+}
+
 /** 清空缓存（测试用） */
 export function clearWasmCache(): void {
   moduleCache.clear();
