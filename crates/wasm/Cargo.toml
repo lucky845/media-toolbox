@@ -24,6 +24,8 @@ version = "0.3"
 [features]
 default = ["image"]
 # 按功能分包：Web 端只在进入对应功能区时加载对应的 wasm。
-image = []
-doc = []
-video = []
+# 每个 feature 转发到 core 的同名 feature，保证只编进需要的算法。
+image = ["media-core/image"] # 注：core 无 image feature 时用空转发（见下）
+doc = ["media-core/pdf"]
+video = ["media-core/video"]
+office = ["media-core/office"]

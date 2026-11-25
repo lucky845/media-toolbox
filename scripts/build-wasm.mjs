@@ -29,8 +29,9 @@ const log = (...a) => console.error(...a);
 /** 包定义：feature → (crate 名, 输出名, 说明) */
 const PACKAGES = [
   { feature: 'image', outName: 'core_image', desc: '图片编解码与变换' },
-  { feature: 'doc', outName: 'core_doc', desc: 'PDF 结构操作' },
-  { feature: 'video', outName: 'core_video', desc: '视频参数与进度解析' },
+  // doc / video / office 合成一个「文档与视频参数」分包：
+  // 这三个 feature 的 wasm 都很小（lopdf 是纯逻辑），单独拆包反而多 3 次网络往返。
+  { feature: 'doc,video,office', outName: 'core_doc', desc: 'PDF 结构操作 + 视频参数 + 文档结构化' },
 ];
 
 const selected = all ? PACKAGES : PACKAGES.filter((p) => p.feature === 'image');

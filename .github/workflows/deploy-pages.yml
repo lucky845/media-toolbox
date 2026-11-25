@@ -43,10 +43,8 @@ jobs:
       - name: build wasm
         run: |
           npm i -D binaryen@^123
-          node scripts/build-wasm.mjs
-          mkdir -p public/wasm
-          cp crates/wasm/pkg/core_image.js public/wasm/
-          cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
+          node scripts/build-wasm.mjs --all
+          node scripts/copy-wasm.mjs
 
       - name: build frontend
         run: npm run build  # tsc + vite + SW 编译

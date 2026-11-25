@@ -27,10 +27,30 @@ features = ["jpeg", "png", "gif", "bmp", "tiff", "webp"]
 version = "0.6"
 optional = true
 
+# PDF 结构操作（合并/拆分/旋转/抽取），纯 Rust、wasm32 可用。
+[dependencies.lopdf]
+version = "0.47"
+default-features = false
+optional = true
+
+# wasm32 下 lopdf 传递依赖 getrandom，需要 wasm_js 后端
+[target.'cfg(target_arch = "wasm32")'.dependencies.lopdf]
+version = "0.47"
+default-features = false
+features = ["wasm_js"]
+optional = true
+
 [features]
-default = ["exif"]
+default = ["exif", "pdf", "video", "office"]
 # EXIF 方向读取与元数据剥离
 exif = ["dep:kamadak-exif"]
+# wasm 图片分包标记（图片算法总在默认里，此 feature 仅用于分包识别）
+image = []
+pdf = ["dep:lopdf"]
+# 视频纯函数（argv/进度/元数据），无外部依赖
+video = []
+# 文档结构化辅助（纯逻辑，不涉及浏览器/子进程）
+office = []
 # PNG 无损优化（oxipng）。默认关闭：wasm 体积 +0.3~0.6 MB br，Phase 1 实测后再定。
 png-optimize = []
 

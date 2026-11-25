@@ -78,18 +78,22 @@ export function CapabilitiesPage() {
             </tr>
             <tr>
               <td>视频压缩 / 转码</td>
-              <td>⚠️ 仅轻量</td>
+              <td>⚠️ 能力探测已接入，WebCodecs 管线 Phase 4b</td>
               <td>✅ 全格式 + 硬件编码</td>
               <td>
-                浏览器的编码器由 Chrome/Safari 决定（通常 H.264/VP9/AV1），容器只出 MP4/WebM；
-                不保证 MKV/MOV/HEVC。桌面版用 FFmpeg sidecar。
+                当前在线版会如实探测浏览器编解码能力，但尚未执行转码（不假装能转）。
+                浏览器的编码器由 Chrome/Safari 决定，容器只出 MP4/WebM；不保证 MKV/MOV/HEVC。
+                需要转码请用桌面版（FFmpeg sidecar）。
               </td>
             </tr>
             <tr>
               <td>PDF → 图片</td>
-              <td>✅ ≤{limits?.maxPages ?? 100} 页</td>
+              <td>⚠️ 渲染管线 Phase 4b 待接入</td>
               <td>✅ 全页数 + 高 DPI</td>
-              <td>pdf.js 按页渲染 + 虚拟化，超出页数在开始前中止</td>
+              <td>
+                当前在线版只做 PDF 结构操作（旋转/拆分/合并/提取）。按页渲染需要 pdf.js +
+                虚拟化缓冲池，将在 Phase 4b 接入；在此之前请到 PDF 页用结构功能或桌面版渲染。
+              </td>
             </tr>
             <tr>
               <td>PDF 合并 / 拆分 / 旋转 / 提取</td>

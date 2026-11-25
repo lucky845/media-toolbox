@@ -39,7 +39,7 @@ const extraAssets = files
 // 代价：新访客多下约 307 KB —— 但进入图片页本来就要下，净增为 0。
 const wasmDir = join(outdir, 'wasm');
 const { readdir: readDir2 } = await import('node:fs/promises');
-const wasmFiles = (await readDir2(wasmDir)).filter((f) => /core_image.*\.(js|wasm)$/.test(f));
+const wasmFiles = (await readDir2(wasmDir)).filter((f) => /core_(image|doc).*\.(js|wasm)$/.test(f));
 for (const f of wasmFiles) extraAssets.push(`wasm/${f}`);
 
 // 注入全局常量（base 相对路径）

@@ -207,16 +207,29 @@ export interface PageRange {
   toInclusive: number;
 }
 
+export interface PageSelectorDto {
+  ranges: PageRange[];
+  oddOnly: boolean;
+  evenOnly: boolean;
+}
+
 export type TaskPayload =
   | { kind: 'image.process'; input: InputRef; params: ImageParams; encode: EncodeOptions }
   | { kind: 'pdf.merge'; inputs: InputRef[] }
   | { kind: 'pdf.split'; input: InputRef; ranges: PageRange[] }
+  | { kind: 'pdf.rotate'; input: InputRef; pages: PageSelectorDto; degrees: number }
+  | { kind: 'pdf.extract'; input: InputRef; pages: PageSelectorDto; what: 'text' | 'images' | 'pages' }
+  | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' }
   | { kind: 'video.transcode'; input: InputRef; params: unknown };
 
 export interface TaskResult {
   bytes: Uint8Array;
   meta: ImageResultMeta;
   outputName: string;
+  /** 多文件输出（PDF 拆分 / 图片提取）时填充 */
+  outputs?: Array<{ name: string; bytes: Uint8Array }>;
+  /** 文本输出（PDF 提取文本）时填充 */
+  text?: string;
 }
 
 export interface Backend {
@@ -235,5 +248,5 @@ export interface Backend {
    * 只读探测（不解码像素）。可选：桌面端也可以实现，但 Phase 1 只有 Web 侧用到。
    * 放在接口上而不是让 UI 去 import 具体类是刻意的 —— 否则 features/ 就会依赖 Web 实现。
    */
-  probe?(ref: InputRef): Promise<ImageMeta>;
+  probe?(ref: InputRef): Promise<unknown>;
 }

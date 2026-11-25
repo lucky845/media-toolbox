@@ -23,6 +23,8 @@ use media_ports::progress::ThrottledProgress;
 use media_ports::{CancelToken, ErrorCode, ToolError};
 use wasm_bindgen::prelude::*;
 
+#[cfg(any(feature = "doc", feature = "video", feature = "office"))]
+mod doc;
 mod errors;
 mod kernel_probe;
 mod parallel;

@@ -150,14 +150,21 @@ SW 改为 install 时预缓存图片 wasm（规格 §18 说「进入功能才拉
 
 ---
 
-## Phase 4 — Web 轻量视频 + 文档 + 能力页 ⬜
+## Phase 4 — Web 轻量视频 + 文档 + 能力页 🟡 结构操作完成，渲染/转码管线留 Phase 4b
 
-- `crates/core/src/pdf/*`（lopdf 结构操作）
-- `crates/core/src/video/{args,progress,meta}.rs`（纯函数，两端共用）
-- `src/lib/backend/web/{webcodecs,mux,probe}.ts`
-- pdf.js 渲染 + 虚拟化
-- Word↔PDF 结构化转换（mammoth + pdf-lib）+ 中文字体子集化
-- 站内「能力与限制」页（已有基础版本，需补全 ⚠️ 项）
+**报告见 [PHASE4-REPORT.md](PHASE4-REPORT.md)。**
+
+已完成：
+- core 新增 PDF 结构操作（lopdf，10 测试）、视频 argv/进度（11 测试）、文档结构化（5 测试）→ core 共 209 测试
+- wasm 第二个分包 `core_doc`（531 KB brotli）+ 统一拷贝脚本
+- PDF 页：探测/旋转/拆分/提取/合并，e2e 通过
+- 文档页：Word↔PDF 结构化入口 + **常驻保真度声明**
+- 视频页：能力探测 + GPL 降级说明（不假装能转）
+- 能力页校正：PDF→图片与视频转码如实标为 Phase 4b 待接入
+
+Phase 4b（待做）：WebCodecs 转码管线、pdf.js 按页渲染+虚拟化、可选 ffmpeg.wasm 执行、完整 docx 文件生成。
+
+---
 
 ## Phase 5 — Tauri 全量 ⬜
 

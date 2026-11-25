@@ -1,6 +1,7 @@
 // Worker 消息协议（`docs/CONTRACTS.md` §6）。主线程与 worker 共用这一份类型。
 
 import type {
+  TaskPayload,
   EncodeOptions,
   ImageMeta,
   ImageParams,
@@ -38,6 +39,14 @@ export type ToWorker =
       inputName: string;
       params: ImageParams;
       encode: EncodeOptions;
+    }
+  | {
+      v: typeof PROTOCOL_VERSION;
+      type: 'runDoc';
+      taskId: string;
+      input: ArrayBuffer;
+      inputName: string;
+      payload: TaskPayload;
     }
   | { v: typeof PROTOCOL_VERSION; type: 'cancel'; taskId: string }
   | { v: typeof PROTOCOL_VERSION; type: 'dispose' };

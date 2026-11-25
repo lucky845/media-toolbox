@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "wasm": "node scripts/build-wasm.mjs",
+    "wasm": "node scripts/build-wasm.mjs --all && node scripts/copy-wasm.mjs",
     "wasm:opt": "node scripts/build-wasm.mjs --opt",
     "verify:single-source": "node scripts/verify-single-source.mjs",
     "verify:conformance": "node scripts/run-conformance.mjs",

@@ -71,7 +71,7 @@ export function ImagePage() {
       try {
         const backend = await getBackend();
         if (!backend.probe) return;
-        const m = await backend.probe(ref);
+        const m = (await backend.probe(ref)) as ImageMeta;
         setMeta(m);
         if (limits) {
           if (m.width * m.height > limits.maxPixels) {

@@ -79,16 +79,13 @@ jobs:
 
       - run: npx vitest run
 
-      - name: build wasm (含 wasm-opt)
+      - name: build wasm (含 wasm-opt，两个分包)
         run: |
           npm i -D binaryen@^123
-          node scripts/build-wasm.mjs
+          node scripts/build-wasm.mjs --all
 
       - name: copy wasm into public/（CI 构建期生成，不进仓库）
-        run: |
-          mkdir -p public/wasm
-          cp crates/wasm/pkg/core_image.js public/wasm/
-          cp crates/wasm/pkg/core_image_bg.wasm public/wasm/
+        run: node scripts/copy-wasm.mjs
 
       - run: npm run build  # tsc + vite + SW 编译
 
