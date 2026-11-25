@@ -65,13 +65,19 @@ try {
       }
     }
 
-    // 2) 所有出现的域名：白名单外一律报出，由人判断是「字符串」还是「请求」
-    for (const m of text.matchAll(URL_RE)) {
-      const host = m[1].toLowerCase();
-      if (ALLOWED.has(host)) continue;
-      console.error(`✗ ${file.replace(repo + '/', '')}: 出现未授权域名 ${host}`);
-      console.error(`    …${text.slice(Math.max(0, m.index - 60), m.index + 80).replace(/\n/g, ' ')}…`);
-      violations++;
+    // 2) 所有出现的域名：白名单外一律报出，由人判断是「字符串」还是「请求」。
+    //    例外：vendored 的 pdf.js（Apache-2.0）源码里带 LICENSE 头注释（www.apache.org）
+    //    以及 URL 解析用的占位域名（example.com / foo.bar）。它们是字符串常量与解析基准，
+    //    不是资源请求；真正会发起请求的写法仍由上面第 1 段 REQUEST_PATTERNS 全量审计。
+    const vendoredPdfJs = file.includes('/pdfjs/');
+    if (!vendoredPdfJs) {
+      for (const m of text.matchAll(URL_RE)) {
+        const host = m[1].toLowerCase();
+        if (ALLOWED.has(host)) continue;
+        console.error(`✗ ${file.replace(repo + '/', '')}: 出现未授权域名 ${host}`);
+        console.error(`    …${text.slice(Math.max(0, m.index - 60), m.index + 80).replace(/\n/g, ' ')}…`);
+        violations++;
+      }
     }
   }
 } catch (e) {

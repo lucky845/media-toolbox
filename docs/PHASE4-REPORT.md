@@ -2,7 +2,8 @@
 
 > 目标：Web 轻量视频 + 轻量文档 + 「能力与限制」页完善。
 > 本次交付：PDF 结构操作（wasm）、Word↔PDF 结构化转换骨架、**常驻保真度声明**、
-> 视频能力探测与 GPL 降级说明。WebCodecs 转码管线与 pdf.js 渲染标注为 Phase 4b（未接入）。
+> 视频能力探测与 GPL 降级说明。WebCodecs 转码管线标注为 Phase 4b（未接入）；
+> pdf.js 按页渲染在 Phase 4b 已接入（见 §7）。
 
 ---
 
@@ -74,7 +75,59 @@ e2e: smoke / pdf / mime / offline 4 项全通过
 ## 6. 明确未做（Phase 4b 及以后）
 
 - **WebCodecs 转码管线**：4b 接入（当前只探测能力、不执行）
-- **pdf.js 按页渲染 + 虚拟化缓冲池**：4b 接入（当前 PDF 页只做结构操作）
 - 可选 ffmpeg.wasm 实际降级按钮（GPL 声明与包已规划，未接执行）
 - 完整 mammoth→pdf-lib 的 docx→pdf 文件生成（当前产出结构化 JSON 中间产物）
 - 桌面端 LibreOffice 调用（Phase 5）
+
+---
+
+## 7. Phase 4b：PDF → 图片渲染（已接入）
+
+### 7.1 架构决策：为什么不用专用 Worker
+
+最初计划做 `pdfRender.worker.ts`（把 pdf.js 塞进专用 Worker）。在真实 Chromium 中做原型验证
+（`/tmp/mt-pdfproto/`）后发现三条死路，已记录在 `src/lib/backend/web/pdfRenderBackend.ts` 顶部注释：
+
+1. pdf.js 6.x ESM 构建强制要求 `GlobalWorkerOptions.workerSrc`，`getDocument` 会在调用方上下文
+   里再 `new Worker(pdf.worker.min.mjs, { type:'module' })`。在专用 Worker 内派生嵌套 Worker 后，
+   握手消息无法被内部 MessageHandler 消费，`task.promise` **永久挂起**。
+2. worker 侧渲染（`rendererSrc`）依赖 `globalThis.document.fonts`，专用 Worker 里没有 document。
+3. 默认 `DOMCanvasFactory` 也依赖 `document.createElement("canvas")`。
+
+最终方案：**主线程动态 import pdf.js（独立懒加载 chunk）** + pdf.js 自带的解析 Worker（解析本就在
+独立线程，天然不阻塞主线程）+ 逐页渲染到 `OffscreenCanvas` + 页间 `setTimeout(0)` yield +
+`IntersectionObserver` 只渲染视口附近页 + ImageBitmap LRU 回收（最多 8 页缓存、12 页本地 DOM）。
+
+### 7.2 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/copy-pdfjs.mjs` | 构建期从 npm 依赖拷贝 `pdf.min.mjs` / `pdf.worker.min.mjs` / 10 个标准字体到 `public/pdfjs/`；产物 `.gitignore`，不进 git |
+| `src/lib/backend/web/pdfRenderBackend.ts` | 渲染后端：按页渲染、预览 LRU、canvas 池、DPI 限幅、长图拼接、逐页导出、错误映射 |
+| `src/features/pdf/PdfPreview.tsx` | 虚拟化预览 UI + 导出控件（DPI / 格式 / 质量 / 页码范围 / 长图） |
+| `src/features/pdf/PdfPage.tsx` | 新增「渲染图片」操作入口；底部限制文案已更正 |
+| `scripts/build-sw.mjs` / `src/sw.ts` | pdf.js 运行时进 SW 预缓存；`CACHE_VERSION` → `v1-phase4b-pdfjs` |
+| `src/features/help/CapabilitiesPage.tsx` | PDF→图片行改为「✅ ≤100 页，按页渲染 + 虚拟化」 |
+| `tests/e2e/pdf-render.mjs` | 真实 Chromium：上传 → 渲染 → 画布像素校验 → 导出 PNG 逐页下载 |
+
+### 7.3 实测与踩坑
+
+- pdf.js 实测体积：`pdf.min.mjs` 113 KB br + `pdf.worker.min.mjs` 311 KB br ≈ **424 KB br**，
+  与 `docs/BUDGET.md` 估算 415 KB br 基本一致。
+- **坑 1**：pdf.js 用静态 `WeakSet` 跟踪「正在渲染的 canvas」。被 `cancel()` 的渲染会延迟一帧才从
+  WeakSet 移除，若把该 canvas 放回池里，下一次 render 会抛
+  `Cannot use the same canvas during multiple render() operations`。修复：每次 pdf.js render 用
+  全新 `OffscreenCanvas`，不回池；池只用于位图→字节转换。
+- **坑 2**：`page.render({ viewport })` 必须传 `page.getViewport()` 返回的真实 `PageViewport`
+  对象（含 `transform`），不能传 `{width,height}` 普通对象，否则抛 `e.transform is not iterable`。
+- **坑 3**：不设置 `GlobalWorkerOptions.standardFontDataUrl` 时标准字体缺失，文字渲染空白。
+- 出厂标准字体有 10 个 `.pfb`（约 1.3 MB raw），全部进 SW 预缓存，离线渲染不缺字。
+- e2e 实测：3 页 sample.pdf → 画布 1020×1320（真实渲染）→ 导出 `page-001/002/003.png`；
+  长图模式导出 `pages-1-3-long.png`；0 个 pageerror / console error。
+
+### 7.4 仍受限制（常驻声明）
+
+- 单次最多 100 页；DPI 200 以上、更高页数、批量导出 → 桌面版。
+- 单页像素上限 20 MP、长图总像素上限 40 MP，超限自动降采样。
+- 不承诺高保真：表单域、批注、页眉页脚、复杂表格、嵌入字体的还原度有限。
+- WebCodecs 转码、ffmpeg.wasm 降级、桌面 LibreOffice 仍属 Phase 4b/5 后续。

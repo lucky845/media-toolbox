@@ -15,8 +15,8 @@
 | `index.html` + manifest + 图标 | 约 30 KB | 约 12 KB | — **[推算]** | 手写 | 首屏 |
 | **`core-image.wasm`**（image+color，jpeg/png/webp/gif/bmp/tiff） | **1254 KB [实测]** | **390 KB [实测]** | **307 KB [实测]** | `crates/wasm --features image` | 进入图片页时 |
 | **`core-doc.wasm`**（lopdf 结构操作） | 约 1.5 MB | 约 0.55 MB | **约 0.45 MB [待测]** | `crates/wasm --features doc` | 进入 PDF 编辑时 |
-| `pdf.js`（`pdf.min.mjs` + `pdf.worker.min.mjs`） | 约 1.7 MB | 约 503 KB | **约 415 KB [实测]** | `pdfjs-dist 6.5.438` | 进入 PDF 渲染时 |
-| pdf.js 字体/CMap 资产（仅用到 CJK 时） | 约 1.2 MB | — | 约 900 KB **[待测]** | `pdfjs-dist/standard_fonts` | 渲染含 CJK 的 PDF 时 |
+| `pdf.js`（`pdf.min.mjs` + `pdf.worker.min.mjs`） | **1.748 MB [实测]**（474+1272 KB） | **516 KB [实测]**（137+380 KB） | **424 KB [实测]**（113+311 KB） | `pdfjs-dist 6.5.438` | 进入 PDF 渲染时（主线程动态 import） |
+| pdf.js 标准字体 10 个 `.pfb`（`standard_fonts/`） | 约 1.3 MB **[实测目录]** | — | 低（PFB 已压缩） | `pdfjs-dist/standard_fonts`，构建期拷入 `dist/pdfjs/` | 渲染未嵌入标准字体的 PDF 时；SW 全量预缓存 |
 | `mammoth`（docx 解析） | 约 520 KB | 约 160 KB | 约 130 KB **[推算]** | npm | 进入 Word 相关功能时 |
 | `pdf-lib` + `fontkit`（结构化生成 PDF） | 约 1.1 MB | 约 320 KB | 约 260 KB **[推算]** | npm | 同上 |
 | 中文字体子集 `NotoSansSC-subset.woff2`（GB2312 6763 字） | 8.3 MB 源 → **1.27 MB woff2 [实测]** | — | 1.27 MB | 构建期 `subset-fonts.mjs` | **仅**「结构化生成含中文的 PDF」时 |
@@ -51,7 +51,7 @@
 进入「图片」页
   + core-image.wasm                                    ≈ 1.05 MB br
 进入「PDF」页
-  + core-doc.wasm (1.4 MB) + pdf.js (415 KB)           ≈ 0.86 MB br
+  + core-doc.wasm (1.4 MB) + pdf.js (424 KB)           ≈ 0.86 MB br
 进入「视频」页（WebCodecs 路线）
   + mp4-muxer/webm-muxer/mp4box 胶水                    ≈ 0.15 MB br
   [若点「改用 ffmpeg.wasm」→ +9.7 MB gzip / 6.9 MB br]
@@ -72,7 +72,7 @@
 |---|---|---|
 | A. 只逛首页就走 | 外壳 | 约 0.12 MB |
 | B. 用图片压缩（最常见） | 外壳 + core-image.wasm | 约 1.17 MB |
-| C. 图片 + PDF + 文档（重度） | 外壳 + image + doc + pdf.js + mammoth/pdf-lib | 约 2.42 MB |
+| C. 图片 + PDF + 文档（重度） | 外壳 + image + doc + pdf.js + mammoth/pdf-lib | 约 2.43 MB |
 | D. C + 用了 ffmpeg.wasm 降级 | C + 9.7 MB | 约 12.1 MB |
 
 ### 3.2 可承载的首访量
@@ -165,7 +165,8 @@ Pages 全站 `Cache-Control: max-age=600`（10 分钟）**[实测]**，也就是
 
 1. `core-image.wasm` 的 brotli 体积（决定 AVIF/oxipng 是否进 Web）。
 2. `core-doc.wasm` 的体积（lopdf 的实际开销）。
-3. pdf.js 的 CJK 字体资产是否真的要被下载（取决于是否设置 `standardFontDataUrl`）。
+3. pdf.js 的 10 个标准字体（约 1.3 MB raw）由构建脚本全量拷入并进 SW 预缓存；
+   首次访问 PDF 渲染功能时已随 SW install 下载，后续回访零流量。
 4. 中文字体子集是否能把 1.27 MB 再压（按 Unicode 区段 + 按实际用到的字符两级子集）。
 5. `vite build` 后的首屏关键路径实际大小（`manualChunks` 策略的效果）。
 

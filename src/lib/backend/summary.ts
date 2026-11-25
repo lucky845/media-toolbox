@@ -38,7 +38,7 @@ export function summarizeCapabilities(caps: Capabilities): CapabilitySummary {
       : caps.offline.installed
         ? '已缓存，可离线使用'
         : caps.offline.serviceWorker
-          ? '尚未缓存（Service Worker 计划在 Phase 3 启用）'
+          ? '首次在线加载后可用（Service Worker 正在安装）'
           : '需要网络',
     fullCapability: full,
   };

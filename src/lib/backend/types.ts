@@ -213,8 +213,25 @@ export interface PageSelectorDto {
   evenOnly: boolean;
 }
 
+/** PDF→图片渲染参数（Web 侧由 pdf.js 在主线程执行；桌面侧走 pdfium/FFmpeg） */
+export interface PdfRenderParams {
+  /** 渲染 DPI，72/96/150/200/300 */
+  dpi: number;
+  /** 页码范围；空数组表示全部页 */
+  pages: PageRange[];
+  /** 输出格式 */
+  format: 'png' | 'jpeg' | 'webp';
+  /** jpeg/webp 质量（0–1），png 忽略 */
+  quality: number;
+  /** 透明背景填充色（PDF 页面默认白底，这里留作显式控制） */
+  background: string;
+  /** 把所有选中页竖向拼成一张长图 */
+  longImage: boolean;
+}
+
 export type TaskPayload =
   | { kind: 'image.process'; input: InputRef; params: ImageParams; encode: EncodeOptions }
+  | { kind: 'pdf.render'; input: InputRef; params: PdfRenderParams }
   | { kind: 'pdf.merge'; inputs: InputRef[] }
   | { kind: 'pdf.split'; input: InputRef; ranges: PageRange[] }
   | { kind: 'pdf.rotate'; input: InputRef; pages: PageSelectorDto; degrees: number }

@@ -24,6 +24,9 @@ public/fonts/*.woff2
 public/fonts/*.ttf
 public/fonts/*.otf
 
+# --- pdf.js 运行文件（构建期从 npm 依赖拷贝，不进仓库）---
+public/pdfjs/
+
 # --- GitHub Pages 自定义域 ---
 # 用自定义 Actions 工作流部署时，GitHub 明确忽略仓库里的 CNAME 文件：
 # "If you are publishing from a custom GitHub Actions workflow, no CNAME file is

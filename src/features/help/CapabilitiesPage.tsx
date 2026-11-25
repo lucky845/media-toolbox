@@ -88,11 +88,12 @@ export function CapabilitiesPage() {
             </tr>
             <tr>
               <td>PDF → 图片</td>
-              <td>⚠️ 渲染管线 Phase 4b 待接入</td>
+              <td>✅ ≤100 页，按页渲染 + 虚拟化</td>
               <td>✅ 全页数 + 高 DPI</td>
               <td>
-                当前在线版只做 PDF 结构操作（旋转/拆分/合并/提取）。按页渲染需要 pdf.js +
-                虚拟化缓冲池，将在 Phase 4b 接入；在此之前请到 PDF 页用结构功能或桌面版渲染。
+                pdf.js 在主线程按页渲染到 OffscreenCanvas，解析由 pdf.js 自带 Worker 完成；
+                只渲染视口附近的页，位图按 LRU 回收。支持 72/120/150/200 DPI、PNG/JPEG/WebP、
+                页码范围与长图拼接；单次最多 100 页，更高 DPI 的批量导出请到桌面版。
               </td>
             </tr>
             <tr>

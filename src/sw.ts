@@ -15,7 +15,7 @@
 // 这些文件不在 index.html 的 <script> 标签里，解析 HTML 拿不到，必须显式预缓存。
 declare const self: ServiceWorkerGlobalScope & { __MT_EXTRA_ASSETS__?: string[] };
 
-const CACHE_VERSION = 'v1-phase4-allwasm';
+const CACHE_VERSION = 'v1-phase4b-pdfjs';
 const SHELL_CACHE = `mt-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `mt-runtime-${CACHE_VERSION}`;
 

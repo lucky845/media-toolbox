@@ -27,8 +27,13 @@
 | Vite | 8.3 | 构建工具（产物含少量 runtime） | MIT | https://github.com/vitejs/vite |
 | TypeScript | 5.9 | 类型系统（仅构建期） | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | binaryen / wasm-opt | 123 | wasm 体积优化（仅构建期） | Apache-2.0 | https://github.com/WebAssembly/binaryen |
+| `pdfjs-dist` | 6.5.438 | PDF 按页渲染（PDF→图片） | Apache-2.0 | https://github.com/mozilla/pdf.js |
 
-**Web 端运行时无第三方字体、无 CDN、无统计脚本。** 图标为自绘 SVG；若将来引入中文字体，见下方「字体」一节。
+pdf.js 的 10 个标准字体（Foxit*.pfb，来自 pdf.js 发行包）随构建脚本拷入
+`dist/pdfjs/standard_fonts/`，用于补齐 PDF 内未嵌入的标准字体。这些是 **pdf.js 自带的字体资产**，
+不是 UI 字体，也不请求外部域名；其许可证随 pdf.js 的 Apache-2.0 一并分发。
+
+**Web 端运行时无 CDN、无统计脚本、无外部字体请求。** 图标为自绘 SVG；若将来引入中文字体，见下方「字体」一节。
 
 ### 可选分包：ffmpeg.wasm（**默认不加载**）
 

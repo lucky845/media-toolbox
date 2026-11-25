@@ -7,8 +7,9 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/build-sw.mjs",
-    "build:only": "vite build && node scripts/build-sw.mjs",
+    "pdfjs": "node scripts/copy-pdfjs.mjs",
+    "build": "tsc --noEmit && npm run pdfjs && vite build && node scripts/build-sw.mjs",
+    "build:only": "npm run pdfjs && vite build && node scripts/build-sw.mjs",
     "preview": "vite preview --port 4173",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -24,6 +25,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zustand": "^5.1.0"

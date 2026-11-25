@@ -3,6 +3,7 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
 import { getDocBackend } from '../../lib/backend/web/docBackend';
+import { PdfPreview } from './PdfPreview';
 import { formatBytes } from '../../lib/errors';
 import type { InputRef, PageRange, ToolError } from '../../lib/backend/types';
 interface PdfMeta {
@@ -15,7 +16,7 @@ const probePdfFile = async (f: File) => await getDocBackend().probe({ file: f, n
 
 const ACCEPT = '.pdf';
 
-type PdfAction = 'rotate' | 'split' | 'extractText' | 'extractImages' | 'merge';
+type PdfAction = 'rotate' | 'split' | 'extractText' | 'extractImages' | 'merge' | 'render';
 
 export function PdfPage() {
   const [files, setFiles] = useState<InputRef[]>([]);
@@ -139,6 +140,7 @@ export function PdfPage() {
             ['extractText', '提取文本'],
             ['extractImages', '提取图片'],
             ['merge', '合并'],
+            ['render', '渲染图片'],
           ] as Array<[PdfAction, string]>).map(([k, label]) => (
             <button key={k} className={action === k ? 'primary' : 'ghost'} onClick={() => setAction(k)}>
               {label}
@@ -174,12 +176,26 @@ export function PdfPage() {
           </div>
         )}
 
-        <div className="row" style={{ marginTop: 16 }}>
-          <button className="primary" onClick={run} disabled={!files.length || busy}>
-            {busy ? '处理中…' : '执行'}
-          </button>
-        </div>
+        {action !== 'render' && (
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="primary" onClick={run} disabled={!files.length || busy}>
+              {busy ? '处理中…' : '执行'}
+            </button>
+          </div>
+        )}
+        {action === 'render' && (
+          <div className="notice info" style={{ marginTop: 14 }}>
+            <span>↓</span><div>渲染在下方「页面预览与图片导出」区完成：支持按需预览、DPI/格式选择、页码范围与长图拼接。</div>
+          </div>
+        )}
       </div>
+
+      {action === 'render' && files[0]?.file && meta && (
+        <PdfPreview file={files[0].file} pageCount={meta.pages} onError={setError} />
+      )}
+      {action === 'render' && !meta && (
+        <div className="card"><span className="hint">正在探测 PDF 页数…</span></div>
+      )}
 
       {result && <div className="notice info"><span>✓</span><div>{result}</div></div>}
       {error && <ErrorBanner error={error} />}
@@ -193,8 +209,9 @@ export function PdfPage() {
         </div>
       )}
 
-      <LimitNotice kind="fidelity" title="PDF 结构操作">
-        旋转、拆分、合并与提取在浏览器内以字节级方式完成。PDF→图片渲染（pdf.js）与 PDF↔Word
+      <LimitNotice kind="fidelity" title="PDF 在线处理说明">
+        旋转、拆分、合并与提取在浏览器内以字节级方式完成。PDF→图片渲染已在浏览器内用 pdf.js
+        逐页完成（≤100 页、按页虚拟化、受内存上限保护）；更高 DPI 的批量导出请到桌面版。PDF↔Word
         高保真转换需桌面版；在线版只做结构化处理。
       </LimitNotice>
     </div>

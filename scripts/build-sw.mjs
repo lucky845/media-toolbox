@@ -42,6 +42,21 @@ const { readdir: readDir2 } = await import('node:fs/promises');
 const wasmFiles = (await readDir2(wasmDir)).filter((f) => /core_(image|doc).*\.(js|wasm)$/.test(f));
 for (const f of wasmFiles) extraAssets.push(`wasm/${f}`);
 
+// pdf.js 运行时（由 scripts/copy-pdfjs.mjs 拷进 dist/pdfjs）：
+// 必须进预缓存，否则离线时 getDocument 找不到 workerSrc / 标准字体，预览直接失败。
+// 只缓存 pdf.min.mjs + pdf.worker.min.mjs + standard_fonts（不缓存 renderer/sandbox，
+// 在线版不用 worker 侧渲染）。绝不缓存任何 URL 含 ffmpeg 的资源。
+const pdfDir = join(outdir, 'pdfjs');
+try {
+  const pdfFiles = (await readDir2(pdfDir)).filter((f) => /^pdf(\.worker)?\.min\.mjs$/.test(f));
+  for (const f of pdfFiles) extraAssets.push(`pdfjs/${f}`);
+  const fontDir = join(pdfDir, 'standard_fonts');
+  const fonts = (await readDir2(fontDir)).filter((f) => f.endsWith('.pfb'));
+  for (const f of fonts) extraAssets.push(`pdfjs/standard_fonts/${f}`);
+} catch {
+  // 开发期没跑过 npm run pdfjs 时跳过，CI 里一定跑过
+}
+
 // 注入全局常量（base 相对路径）
 const injection = `self.__MT_EXTRA_ASSETS__=${JSON.stringify(extraAssets)};\n`;
 code = injection + code;
