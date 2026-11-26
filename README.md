@@ -58,11 +58,11 @@
 
 | 源文件 | 形态 | 说明 |
 |---|---|---|
-| [Windows x64 MSI](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox_0.1.0_win-x64.msi) | `.msi` | 110 MB |
-| [macOS arm64 dmg](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox_0.1.0_macos-arm64.dmg) | `.dmg` | 22 MB |
-| [macOS arm64 app](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox_0.1.0_macos-arm64.app.tar.gz) | `.app.tar.gz` | 22 MB |
-| [Linux x64 deb](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox_0.1.0_linux-x64.deb) | `.deb` | 120 MB |
-| [Linux x64 AppImage](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox_0.1.0_linux-x64.AppImage) | `.AppImage` | 183 MB |
+| [Windows x64 MSI](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-win-x64.msi) | `.msi` | 110 MB |
+| [macOS arm64 dmg](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-macos-arm64.dmg) | `.dmg` | 22 MB |
+| [macOS arm64 app](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-macos-arm64.app.tar.gz) | `.app.tar.gz` | 22 MB |
+| [Linux x64 deb](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-linux-x64.deb) | `.deb` | 120 MB |
+| [Linux x64 AppImage](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-linux-x64.AppImage) | `.AppImage` | 183 MB |
 
 > [!WARNING]
 > **macOS 包未签名**（零成本约束：Apple 开发者账号 $99/年）。首次打开需在「应用程序」里右键 → 打开，
@@ -258,7 +258,7 @@ node scripts/check-notices.mjs          # 许可证声明完整性
 3. 打 tag 并推送：`git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`。
 4. `release-desktop` workflow 在 Windows / macOS / Linux 三平台构建并上传安装包；
    `deploy-pages` 同步发布在线版。
-5. 产物命名：`MediaToolbox_<版本>_<平台>-<架构>.<扩展名>`。
+5. 产物命名：`MediaToolbox-<版本>-<平台>-<架构>.<扩展名>`。
 
 ---
 
