@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
-import { getDocBackend } from '../../lib/backend/web/docBackend';
+import { getBackend } from '../../lib/backend';
 import { formatBytes } from '../../lib/errors';
 import type { InputRef, ToolError } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
@@ -25,9 +25,15 @@ export function DocumentsPage() {
   }, []);
 
   const pick = useCallback(async () => {
-    const refs = await getDocBackend().pickFiles('.docx,.pdf', false);
+    const backend = await getBackend();
+    const refs = await backend.pickFiles('.docx,.pdf', false);
     if (refs[0]) setFile(refs[0]);
   }, []);
+
+  // 能力驱动：桌面有 LibreOffice → 走 office.convert（原生高保真）；
+  // 在线版无外部进程 → 退回 office.structure（结构化 + 保真度声明）。
+  // 组件只问 capabilities，不 if(isTauri)。
+  const isNative = caps?.office.wordToPdf === 'native';
 
   const run = useCallback(async () => {
     if (!file) return;
@@ -37,24 +43,25 @@ export function DocumentsPage() {
     const id = `office-${Date.now().toString(36)}`;
     const ac = new AbortController();
     try {
-      const out = await getDocBackend().run({
-        kind: 'office.structure',
-        input: file,
-        direction,
-      }, { taskId: id, signal: ac.signal, onProgress: () => {} });
-
-      // 结构化结果（JSON 段落），前端可进一步用 docx/pdf-lib 生成文件。
-      // Phase 4 先提供结构化中间产物与保真度声明。
-      await getDocBackend().saveOutput(out.bytes, out.outputName);
-      setResult(`结构化结果已生成（${formatBytes(out.bytes.length)}，${out.outputName}）`);
+      const backend = await getBackend();
+      const out = await backend.run(
+        isNative
+          ? { kind: 'office.convert', input: file, direction }
+          : { kind: 'office.structure', input: file, direction },
+        { taskId: id, signal: ac.signal, onProgress: () => {} },
+      );
+      await backend.saveOutput(out.bytes, out.outputName);
+      setResult(
+        isNative
+          ? `已生成 ${out.outputName}（LibreOffice 原生转换）`
+          : `结构化结果已生成（${formatBytes(out.bytes.length)}，${out.outputName}）`,
+      );
     } catch (e) {
       setError(e as ToolError);
     } finally {
       setBusy(false);
     }
-  }, [file, direction]);
-
-  const isNative = caps?.office.wordToPdf === 'native';
+  }, [file, direction, isNative]);
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -79,7 +86,7 @@ export function DocumentsPage() {
         )}
         <div className="row" style={{ marginTop: 16 }}>
           <button className="primary" onClick={run} disabled={!file || busy}>
-            {busy ? '处理中…' : '开始结构化转换'}
+            {busy ? '处理中…' : isNative ? '开始原生转换' : '开始结构化转换'}
           </button>
         </div>
       </div>

@@ -7,6 +7,7 @@
 
 import { warmWasm } from './wasmLoader';
 import { getVideoBackend, videoCodecSupport } from './videoBackend';
+import { getDocBackend } from './docBackend';
 import type { VideoProbeResult } from '../types';
 import {
   PROTOCOL_VERSION,
@@ -315,6 +316,23 @@ export class WebBackend implements Backend_ {
       return getVideoBackend().run(task.input, task.params, opts);
     }
 
+    // PDF 结构操作：委托给专用后端（它内部是 core_doc wasm worker）。
+    if (
+      task.kind === 'pdf.merge' || task.kind === 'pdf.split' ||
+      task.kind === 'pdf.rotate' || task.kind === 'pdf.extract'
+    ) {
+      return getDocBackend().run(task, opts);
+    }
+
+    // 文档结构化：docx2pdf 用 mammoth 读 docx 文本；pdf2docx 用 core_doc 的 PDF 文本抽取。
+    // 两者都只产出「结构化中间产物」（JSON 段落），Web 不承诺高保真（UI 常驻声明）。
+    if (task.kind === 'office.structure') {
+      if (task.direction === 'docx2pdf') {
+        return this.structureDocx(task.input, opts);
+      }
+      return getDocBackend().run(task, opts);
+    }
+
     if (task.kind !== 'image.process') {
       throw {
         code: 'UNSUPPORTED_FORMAT',
@@ -413,6 +431,44 @@ export class WebBackend implements Backend_ {
         [buf],
       );
     });
+  }
+
+  /** docx 结构化（Web 侧 mammoth 在主线程只读文本，输出 JSON 段落；不生成 PDF，不承诺高保真）。
+   *  mammoth 走动态 import，不进首屏包。
+   */
+  private async structureDocx(ref: InputRef, opts: RunOptions): Promise<TaskResult> {
+    if (!ref.file) {
+      throw { code: 'IO', message: '结构化读取需要浏览器文件对象', retryable: false, desktopHint: false } satisfies ToolError;
+    }
+    const mammoth = await import('mammoth/mammoth.browser');
+    const arrayBuffer = await ref.file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    // 按空行/换行切段，启发式识别标题（与 core::office::structure_text 同规则）
+    const paras = result.value
+      .split(/\n\s*\n/)
+      .flatMap((block) => block.split('\n'))
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((text) => ({
+        text,
+        headingLevel: text.length < 80 && !/[。，,.；;]$/.test(text) ? 1 : 0,
+      }));
+    opts.onProgress({ done: 1, total: 1, phase: 'finalizing', unit: 'percent' });
+    const bytes = new TextEncoder().encode(JSON.stringify(paras, null, 2));
+    return {
+      bytes,
+      outputName: 'structured.json',
+      meta: {
+        outFormat: 'pdf',
+        outWidth: 0,
+        outHeight: 0,
+        inputBytes: ref.size,
+        outputBytes: bytes.length,
+        outputHash: '',
+        savingsRatio: 0,
+        savingsText: `${paras.length} 个结构化段落（不承诺高保真）`,
+      },
+    };
   }
 
   /** 视频探测（Web 侧由 mp4box 解封装，主线程，无字节进 wasm） */

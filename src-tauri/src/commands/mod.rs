@@ -1,4 +1,5 @@
 pub mod image;
+pub mod office;
 pub mod probe;
 pub mod video;
 

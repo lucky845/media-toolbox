@@ -66,11 +66,16 @@ try {
     }
 
     // 2) 所有出现的域名：白名单外一律报出，由人判断是「字符串」还是「请求」。
-    //    例外：vendored 的 pdf.js（Apache-2.0）源码里带 LICENSE 头注释（www.apache.org）
-    //    以及 URL 解析用的占位域名（example.com / foo.bar）。它们是字符串常量与解析基准，
-    //    不是资源请求；真正会发起请求的写法仍由上面第 1 段 REQUEST_PATTERNS 全量审计。
-    const vendoredPdfJs = file.includes('/pdfjs/');
-    if (!vendoredPdfJs) {
+    //    例外：第三方 vendored 代码里的域名常量不是资源请求，逐条说明：
+    //      - pdf.js 的 Apache LICENSE 注释（www.apache.org）与 URL 解析占位（example.com / foo.bar）；
+    //      - mammoth 的 OOXML 命名空间 URI（schemas.*）与 jszip 报错文档链接（stuk.github.io）；
+    //      - rolldown runtime 的打包报错文档链接（rolldown.rs）。
+    //    真正会发起请求的写法仍由上面第 1 段 REQUEST_PATTERNS 全量审计，不在此豁免。
+    const vendoredStringConstants =
+      file.includes('/pdfjs/') ||
+      file.includes('/assets/mammoth.browser-') ||
+      file.includes('/assets/rolldown-runtime-');
+    if (!vendoredStringConstants) {
       for (const m of text.matchAll(URL_RE)) {
         const host = m[1].toLowerCase();
         if (ALLOWED.has(host)) continue;

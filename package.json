@@ -25,6 +25,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "mammoth": "^1.13.0",
     "mp4-muxer": "^5.2.2",
     "mp4box": "^2.6.0",
     "pdfjs-dist": "^6.5.438",

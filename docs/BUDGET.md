@@ -17,7 +17,7 @@
 | **`core-doc.wasm`**（lopdf 结构操作） | 约 1.5 MB | 约 0.55 MB | **约 0.45 MB [待测]** | `crates/wasm --features doc` | 进入 PDF 编辑时 |
 | `pdf.js`（`pdf.min.mjs` + `pdf.worker.min.mjs`） | **1.748 MB [实测]**（474+1272 KB） | **516 KB [实测]**（137+380 KB） | **424 KB [实测]**（113+311 KB） | `pdfjs-dist 6.5.438` | 进入 PDF 渲染时（主线程动态 import） |
 | pdf.js 标准字体 10 个 `.pfb`（`standard_fonts/`） | 约 1.3 MB **[实测目录]** | — | 低（PFB 已压缩） | `pdfjs-dist/standard_fonts`，构建期拷入 `dist/pdfjs/` | 渲染未嵌入标准字体的 PDF 时；SW 全量预缓存 |
-| `mammoth`（docx 解析） | 约 520 KB | 约 160 KB | 约 130 KB **[推算]** | npm | 进入 Word 相关功能时 |
+| `mammoth`（docx 解析，动态 import 独立 chunk） | **298 KB [实测]** | **87 KB [实测]** | **74 KB [实测]** | mammoth 1.13.0 | 进入文档页且选 docx2pdf 时 |
 | `pdf-lib` + `fontkit`（结构化生成 PDF） | 约 1.1 MB | 约 320 KB | 约 260 KB **[推算]** | npm | 同上 |
 | 中文字体子集 `NotoSansSC-subset.woff2`（GB2312 6763 字） | 8.3 MB 源 → **1.27 MB woff2 [实测]** | — | 1.27 MB | 构建期 `subset-fonts.mjs` | **仅**「结构化生成含中文的 PDF」时 |
 | WebCodecs 转码链（`mp4box` + `mp4-muxer` + `webm-muxer` + `videoBackend` 胶水，实测并入 `index-*.js`） | — | **index chunk 90 KB gzip [实测]**（全站入口，含图片/PDF/视频胶水） | **见 dist 合计** | npm | 进入视频页时（代码随入口一起加载，编解码由浏览器原生执行不占包体） |

@@ -37,6 +37,7 @@ pub fn run() {
             commands::video::video_transcode,
             commands::video::video_extract_frame,
             commands::video::video_extract_audio,
+            commands::office::office_convert,
             commands::cancel_task,
             commands::sidecar_info,
         ])

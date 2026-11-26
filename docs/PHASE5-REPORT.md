@@ -69,10 +69,24 @@ Tauri 二进制                        cargo build 成功，启动无崩溃
 - dependabot 的 glib moderate 漏洞只在 Linux GTK 依赖树；macOS target 依赖树无 glib，
   不影响 macOS 首目标。后续若启用 Linux 产物再处理。
 
-## 6. 本轮未做（按同一模式后续铺开）
+## 6. 第二批：LibreOffice headless Word↔PDF（已接入）
+
+- 新增 `src-tauri/src/commands/office.rs`：`office_convert` command，调用 soffice
+  `--headless --convert-to pdf|docx`，独立 user profile 避免与用户实例冲突，
+  输出到同目录并按 taskId 命名防覆盖；无 LibreOffice 返回 `LibreOfficeMissing` 而非假装转换。
+- `sidecar.rs` 新增 `libreoffice_path()`（安装包/系统/PATH 查找），`probe()` 复用它。
+- 前端 `DocumentsPage` 按 `caps.office.wordToPdf === 'native'` 选择 `office.convert`（桌面原生）
+  或 `office.structure`（在线结构化）；组件不判断「是不是桌面」，只问能力（D3）。
+- 顺带修复一个既有缺陷：在线版 docx2pdf 原先错误地对 docx 做 PDF 文本抽取（报「不是 PDF 文件」）。
+  现在 Web 侧用 mammoth 读 docx 文本，输出结构化 JSON 段落（动态 import，298 KB raw / 74 KB br），
+  并保留常驻「不承诺高保真」声明。
+- 验证：Tauri 6 个 command 测试（含 LibreOfficeMissing 路径）+ 新增 `documents.mjs` e2e
+  （真实 Chromium 上传 docx → 结构化 → 下载 structured.json，0 错误）。
+
+## 7. 本轮仍未做（按同一模式后续铺开）
 
 - PDF 高 DPI 批量渲染：按用户决策复用 pdf.js，桌面侧只需放宽页数/DPI 阈值（前端 capabilities），
   无需新 sidecar。
-- LibreOffice headless Word↔PDF command（`sidecar.rs` 已有探测，command 未接）。
 - 三平台 Release 实测出包：需 tag 触发 CI，本轮只保证 workflow 配置正确、二进制可构建。
 - 批量队列接入桌面并行（rayon 已在 image command 使用，视频批量尚未）。
+- 本机无 LibreOffice，原生转换的真实验证只能在装有 LO 的机器/CI 上做；本轮验证了错误路径。

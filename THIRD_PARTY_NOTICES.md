@@ -28,6 +28,7 @@
 | TypeScript | 5.9 | 类型系统（仅构建期） | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | binaryen / wasm-opt | 123 | wasm 体积优化（仅构建期） | Apache-2.0 | https://github.com/WebAssembly/binaryen |
 | `pdfjs-dist` | 6.5.438 | PDF 按页渲染（PDF→图片） | Apache-2.0 | https://github.com/mozilla/pdf.js |
+| `mammoth` | 1.13.0 | Word(docx) 文本解析（在线版结构化转换） | BSD-2-Clause | https://github.com/mwilliamson/mammoth.js |
 | `mp4box` | 2.6.0 | MP4 解封装（视频转码读取样本） | BSD-3-Clause | https://github.com/gpac/mp4box.js |
 | `mp4-muxer` | 5.2.2 | MP4/H.264 封装 | MIT | https://github.com/Vanilagy/mp4-muxer |
 | `webm-muxer` | 5.1.4 | WebM/VP9 封装 | MIT | https://github.com/Vanilagy/webm-muxer |

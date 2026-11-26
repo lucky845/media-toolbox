@@ -149,6 +149,37 @@ export class DesktopBackend implements Backend {
         };
       }
 
+      if (task.kind === 'office.convert') {
+        // 桌面：LibreOffice headless 原生转换，输出路径由 Rust 决定并已写盘。
+        if (!task.input.path) {
+          throw {
+            code: 'INVALID_PARAMS',
+            message: '桌面端需要文件路径',
+            retryable: false,
+            desktopHint: false,
+          } satisfies ToolError;
+        }
+        const r = await invoke<{ outputPath: string; direction: string }>('office_convert', {
+          inputPath: task.input.path,
+          direction: task.direction,
+          taskId: opts.taskId,
+        });
+        return {
+          bytes: new Uint8Array(0),
+          meta: {
+            outFormat: 'pdf',
+            outWidth: 0,
+            outHeight: 0,
+            inputBytes: task.input.size,
+            outputBytes: 0,
+            outputHash: '',
+            savingsRatio: 0,
+            savingsText: `已写入 ${r.outputPath.split(/[\\/]/).pop() ?? '文件'}`,
+          },
+          outputName: r.outputPath.split(/[\\/]/).pop() ?? 'document',
+        };
+      }
+
       if (task.kind === 'video.transcode') {
         // 桌面：ffprobe 探测 + FFmpeg sidecar 转码，输出路径由 Rust 决定（不经过 JS 字节）。
         if (!task.input.path) {

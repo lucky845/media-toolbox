@@ -48,6 +48,30 @@ pub fn binary_path(name: &str) -> Option<PathBuf> {
     sidecar_path(name)
 }
 
+/// LibreOffice 可执行文件：安装包内优先，其次系统安装/PATH。
+pub fn libreoffice_path() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let candidates = [
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        "LibreOffice.app/Contents/MacOS/soffice",
+    ];
+    #[cfg(target_os = "windows")]
+    let candidates = [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        "LibreOffice/program/soffice.exe",
+    ];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let candidates = ["/usr/bin/soffice", "soffice"];
+
+    for c in candidates {
+        let p = PathBuf::from(c);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    which("soffice")
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -119,24 +143,7 @@ pub fn probe() -> SidecarProbe {
         }
     }
 
-    // LibreOffice：不启动它（启动要 2–3 秒），只检查可执行文件存在
-    #[cfg(target_os = "macos")]
-    let lo_candidates = [
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-        "LibreOffice.app/Contents/MacOS/soffice",
-    ];
-    #[cfg(target_os = "windows")]
-    let lo_candidates = [
-        r"C:\Program Files\LibreOffice\program\soffice.exe",
-        "LibreOffice/program/soffice.exe",
-    ];
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let lo_candidates = ["/usr/bin/soffice", "soffice"];
-
-    p.libreoffice_ok = lo_candidates
-        .iter()
-        .any(|c| std::path::Path::new(c).exists())
-        || which("soffice").is_some();
+    p.libreoffice_ok = libreoffice_path().is_some();
 
     p
 }

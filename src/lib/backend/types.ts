@@ -274,7 +274,9 @@ export type TaskPayload =
   | { kind: 'pdf.split'; input: InputRef; ranges: PageRange[] }
   | { kind: 'pdf.rotate'; input: InputRef; pages: PageSelectorDto; degrees: number }
   | { kind: 'pdf.extract'; input: InputRef; pages: PageSelectorDto; what: 'text' | 'images' | 'pages' }
-  | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' };
+  | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' }
+  /** 桌面端用 LibreOffice headless 原生转换（Web 不支持，UI 按 capabilities 决定） */
+  | { kind: 'office.convert'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' };
 
 export interface TaskResult {
   bytes: Uint8Array;
