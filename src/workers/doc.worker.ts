@@ -3,7 +3,6 @@
 
 import { loadWasmModule } from '../lib/backend/web/wasmLoader';
 import { PROTOCOL_VERSION, type FromWorker, type ToWorker } from './protocol';
-import type { TaskPayload } from '../lib/backend/types';
 
 // core_doc.js 的导出形态（与 crates/wasm/src/doc.rs 一一对应）
 interface DocGlue {
@@ -117,16 +116,13 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
       }
       const taskId = msg.taskId;
       try {
-        const payload = msg.payload as TaskPayload;
+        const { payload } = msg;
         let bytes: Uint8Array = new Uint8Array(0);
         let outputs: Array<{ name: string; bytes: Uint8Array }> | undefined;
         let text: string | undefined;
         let outputName = 'output.pdf';
 
-        // 输入字节（含多输入）
-        const inputs = 'inputs' in payload
-          ? (payload.inputs as Array<{ file?: File; name: string }>).map((_r) => new Uint8Array()) // 多文件由主线程逐个 transfer，这里简化
-          : [new Uint8Array(msg.input.slice(0))];
+        const inputs = msg.inputs.map((buffer) => new Uint8Array(buffer));
 
         switch (payload.kind) {
           case 'pdf.merge': {

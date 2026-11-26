@@ -4,8 +4,8 @@
 
 #[cfg(feature = "pdf")]
 pub mod ops;
-#[cfg(feature = "pdf")]
-pub mod pages;
+// 说明：这里曾有一个 `pages` 子模块，但只含一行文档注释、无任何实现，
+// 页面选择逻辑实际在 ops.rs 的 PageSelector / PageRange 里。已删除以免误导。
 
 #[cfg(feature = "pdf")]
 pub use ops::{

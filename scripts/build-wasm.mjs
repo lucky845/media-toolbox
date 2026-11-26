@@ -22,6 +22,8 @@ const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
 const opt = flag('--opt');
 const all = flag('--all');
+// CI 用：--opt 必须真的成功，失败即中断（防止「以为优化了其实没有」）
+const requireOpt = flag('--require-opt');
 const checkOnly = flag('--check-bindgen');
 
 const log = (...a) => console.error(...a);
@@ -84,12 +86,21 @@ function runWasmOpt(wasmPath) {
   const local = join(repo, 'node_modules/.bin/wasm-opt');
   const bin = existsSync(local) ? local : 'wasm-opt';
   try {
-    // -Oz 体积优先；--enable-bulk-memory 与 .cargo/config.toml 的 target-feature 对齐
+    // -Oz 体积优先。feature 集必须与 rustc 实际产出的指令集一致，
+    // 否则 wasm-opt 会以「all used features should be allowed」校验失败并退出 1：
+    //   --enable-bulk-memory               ← .cargo/config.toml target-feature
+    //   --enable-mutable-globals           ← 同上
+    //   --enable-sign-ext                  ← wasm-bindgen / 标准库
+    //   --enable-nontrapping-float-to-int  ← 关键项：缺它会因 i64.trunc_sat_f64_u 直接失败
+    // 历史 bug：此列表缺最后两项，wasm-opt 恒失败，被 catch 静默吞掉，
+    // 产物 optApplied=false 且多传约 9% 体积（实测 core_image 1286196 → 1164776 B）。
     run(bin, [
       wasmPath,
       '-Oz',
       '--enable-bulk-memory',
       '--enable-mutable-globals',
+      '--enable-sign-ext',
+      '--enable-nontrapping-float-to-int',
       '--strip-debug',
       '--strip-producers',
       '-o',
@@ -97,7 +108,12 @@ function runWasmOpt(wasmPath) {
     ]);
     return true;
   } catch (e) {
-    log(`wasm-opt 失败（可能是未安装 binaryen），跳过：${String(e.message).split('\n')[0]}`);
+    const msg = String(e.message).split('\n')[0];
+    // 显式要求优化时硬失败：静默降级会让「已优化」的假设失效而无人察觉。
+    if (requireOpt) {
+      throw new Error(`wasm-opt 失败且 --require-opt 生效，拒绝静默跳过：${msg}`);
+    }
+    log(`wasm-opt 失败（可能是未安装 binaryen），跳过：${msg}`);
     return false;
   }
 }
@@ -204,4 +220,4 @@ await writeFile(
 );
 
 log(`\n已写入 ${sizeFile}`);
-log('提示：--opt 需要 binaryen（npm i -D binaryen）。CI 里必装，本地可跳过。');
+log('提示：--opt 需要 binaryen（npm i -D binaryen）。CI 用 --opt --require-opt：缺 binaryen 就直接失败，不静默降级。');

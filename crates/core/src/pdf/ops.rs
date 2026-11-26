@@ -113,16 +113,31 @@ pub struct PdfMeta {
     pub version: String,
 }
 
-/// 合并多个 PDF，按输入顺序拼接页面。
-pub fn pdf_merge(inputs: &[Vec<u8>]) -> Result<Vec<u8>> {
-    if inputs.len() < 2 {
+/// Validate merge input count before reading or copying byte buffers.
+pub fn check_merge_count(count: usize, limits: &Limits) -> Result<()> {
+    if count < 2 {
         return Err(ToolError::invalid("合并至少需要 2 个 PDF"));
     }
+    if count > limits.max_batch as usize {
+        return Err(ToolError::invalid(format!(
+            "合并最多支持 {} 个 PDF（当前 {count} 个）",
+            limits.max_batch
+        )));
+    }
+    Ok(())
+}
 
-    let mut out = lopdf::Document::new();
-    out.version = "1.7".into();
-    let mut page_ids = Vec::new();
+/// 合并多个 PDF，按输入顺序拼接页面。
+pub fn pdf_merge(inputs: &[Vec<u8>], limits: &Limits) -> Result<Vec<u8>> {
+    check_merge_count(inputs.len(), limits)?;
+    let total_bytes = inputs
+        .iter()
+        .fold(0u64, |total, data| total.saturating_add(data.len() as u64));
+    crate::common::limits_check::check_bytes(total_bytes, limits)?;
 
+    // Validate the full page count before copying any page object trees.
+    let mut documents = Vec::with_capacity(inputs.len());
+    let mut total_pages = 0usize;
     for data in inputs {
         let doc = lopdf::Document::load_mem(data)
             .map_err(|e| ToolError::new(ErrorCode::DecodeFailed, &[]).with_detail(e.to_string()))?;
@@ -132,10 +147,17 @@ pub fn pdf_merge(inputs: &[Vec<u8>]) -> Result<Vec<u8>> {
         }
 
         let ids = ordered_page_ids(&doc);
+        total_pages = total_pages.saturating_add(ids.len());
+        check_page_limit(total_pages, limits)?;
+        documents.push((doc, ids));
+    }
+
+    let mut out = lopdf::Document::new();
+    out.version = "1.7".into();
+    let mut page_ids = Vec::with_capacity(total_pages);
+    for (doc, ids) in documents {
         for pid in ids {
-            // 深拷贝页面对象树到目标文档：用递归复制，避免引用悬空
-            let new_id = copy_object_tree(&doc, pid, &mut out)?;
-            page_ids.push(new_id);
+            page_ids.push(copy_object_tree(&doc, pid, &mut out)?);
         }
     }
 
@@ -151,7 +173,7 @@ pub fn pdf_split(
 ) -> Result<Vec<(String, Vec<u8>)>> {
     let doc = load(src)?;
     let pages = ordered_page_ids(&doc);
-    check_page_limit(pages.len() as u32, limits)?;
+    check_page_limit(pages.len(), limits)?;
 
     let mut out = Vec::new();
     for (i, r) in ranges.iter().enumerate() {
@@ -192,7 +214,7 @@ pub fn pdf_rotate(
     }
     let mut doc = load(src)?;
     let ids = ordered_page_ids(&doc);
-    check_page_limit(ids.len() as u32, limits)?;
+    check_page_limit(ids.len(), limits)?;
 
     for (i, pid) in ids.iter().enumerate() {
         let one_based = i as u32 + 1;
@@ -215,7 +237,7 @@ pub fn pdf_rotate(
 pub fn pdf_extract_pages(src: &[u8], pages: &PageSelector, limits: &Limits) -> Result<Vec<u8>> {
     let doc = load(src)?;
     let ids = ordered_page_ids(&doc);
-    check_page_limit(ids.len() as u32, limits)?;
+    check_page_limit(ids.len(), limits)?;
 
     let selected: Vec<_> = ids
         .iter()
@@ -244,7 +266,7 @@ pub fn pdf_extract_pages(src: &[u8], pages: &PageSelector, limits: &Limits) -> R
 pub fn pdf_extract_text(src: &[u8], pages: &PageSelector, limits: &Limits) -> Result<String> {
     let doc = load(src)?;
     let ids = ordered_page_ids(&doc);
-    check_page_limit(ids.len() as u32, limits)?;
+    check_page_limit(ids.len(), limits)?;
 
     let mut out = String::new();
     for (i, pid) in ids.iter().enumerate() {
@@ -266,7 +288,7 @@ pub fn pdf_extract_images(
 ) -> Result<Vec<(String, Vec<u8>)>> {
     let doc = load(src)?;
     let ids = ordered_page_ids(&doc);
-    check_page_limit(ids.len() as u32, limits)?;
+    check_page_limit(ids.len(), limits)?;
 
     let mut out = Vec::new();
     for (i, pid) in ids.iter().enumerate() {
@@ -315,10 +337,13 @@ fn load(data: &[u8]) -> Result<lopdf::Document> {
         .map_err(|e| ToolError::new(ErrorCode::DecodeFailed, &[]).with_detail(e.to_string()))
 }
 
-fn check_page_limit(n: u32, limits: &Limits) -> Result<()> {
-    if n > limits.max_pages {
+fn check_page_limit(n: usize, limits: &Limits) -> Result<()> {
+    if n > limits.max_pages as usize {
         let limit = limits.max_pages.to_string();
-        return Err(ToolError::new(ErrorCode::PageLimit, &[("limit", &limit)]));
+        // 带上实际页数，否则用户只知道「超限」却不知道自己有多少页
+        // （与 common::limits_check::check_pages 的措辞保持一致）。
+        let detail = format!("当前 {n} 页，上限 {} 页", limits.max_pages);
+        return Err(ToolError::new(ErrorCode::PageLimit, &[("limit", &limit)]).with_detail(detail));
     }
     Ok(())
 }
@@ -591,8 +616,66 @@ mod tests {
     fn merge_two_documents() {
         let a = make_pdf(2);
         let b = make_pdf(3);
-        let merged = pdf_merge(&[a, b]).unwrap();
+        let merged = pdf_merge(&[a, b], &Limits::DESKTOP).unwrap();
         assert_eq!(probe_pdf(&merged).unwrap().pages, 5);
+    }
+
+    #[test]
+    fn merge_accumulated_pages_trip_limit() {
+        // 单份都在上限内，但累积超限必须中止（回归：此前 merge 完全不校验页数）
+        let doc = make_pdf(40);
+        let inputs: Vec<Vec<u8>> = (0..4).map(|_| doc.clone()).collect();
+        let err = pdf_merge(&inputs, &Limits::WEB).unwrap_err();
+        assert_eq!(err.code, ErrorCode::PageLimit);
+    }
+
+    #[test]
+    fn test_pdf_merge_rejects_cumulative_bytes_before_decoding() {
+        let limits = Limits {
+            max_bytes: 10,
+            ..Limits::WEB
+        };
+        let inputs = [vec![0; 6], vec![0; 5]];
+        let err = pdf_merge(&inputs, &limits).unwrap_err();
+        assert_eq!(err.code, ErrorCode::InputTooLarge);
+    }
+
+    #[test]
+    fn test_pdf_merge_rejects_excessive_file_count_before_decoding() {
+        let limits = Limits {
+            max_batch: 2,
+            ..Limits::WEB
+        };
+        let inputs = [vec![], vec![], vec![]];
+        let err = pdf_merge(&inputs, &limits).unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
+    }
+
+    #[test]
+    fn test_pdf_merge_checks_total_pages_before_copying_objects() {
+        let mut broken = lopdf::Document::load_mem(&make_pdf(1)).unwrap();
+        let page_id = ordered_page_ids(&broken)[0];
+        broken
+            .get_object_mut(page_id)
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .set("Contents", lopdf::Object::Reference((9999, 0)));
+        let broken = save_to_bytes(&mut broken).unwrap();
+        let limits = Limits {
+            max_pages: 1,
+            ..Limits::WEB
+        };
+        let err = pdf_merge(&[broken, make_pdf(1)], &limits).unwrap_err();
+        assert_eq!(err.code, ErrorCode::PageLimit);
+    }
+
+    #[test]
+    fn merge_within_limit_is_allowed() {
+        let doc = make_pdf(30);
+        let inputs: Vec<Vec<u8>> = (0..3).map(|_| doc.clone()).collect();
+        let merged = pdf_merge(&inputs, &Limits::WEB).unwrap();
+        assert_eq!(probe_pdf(&merged).unwrap().pages, 90);
     }
 
     #[test]

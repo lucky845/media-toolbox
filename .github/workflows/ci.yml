@@ -82,7 +82,10 @@ jobs:
       - name: build wasm (含 wasm-opt，两个分包)
         run: |
           npm i -D binaryen@^123
-          node scripts/build-wasm.mjs --all
+          # --opt --require-opt：wasm-opt 必须真的跑成功。
+          # 历史问题：feature 参数不全导致 wasm-opt 恒退出 1 被 catch 吞掉，
+          # 产物 optApplied=false 且多传约 9% 体积，而 CI 一路绿灯。
+          node scripts/build-wasm.mjs --all --opt --require-opt
 
       - name: copy wasm into public/（CI 构建期生成，不进仓库）
         run: node scripts/copy-wasm.mjs

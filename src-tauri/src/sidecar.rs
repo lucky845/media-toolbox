@@ -27,20 +27,22 @@ fn sidecar_path(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     // Tauri 把 externalBin 放在可执行文件同级（macOS 在 .app/Contents/MacOS/）
-    for cand in [
+    let candidates = [
         dir.join(name),
+        dir.join(format!("{name}.exe")),
         dir.join(format!("{name}-aarch64-apple-darwin")),
         dir.join(format!("{name}-x86_64-apple-darwin")),
         dir.join(format!("{name}-x86_64-pc-windows-msvc.exe")),
         dir.join(format!("{name}-x86_64-unknown-linux-gnu")),
         dir.join("..").join("Resources").join(name),
-    ] {
+    ];
+    for cand in candidates {
         if cand.exists() {
             return Some(cand);
         }
     }
-    // PATH 兜底（开发期）
-    which(name)
+    // PATH 兜底（开发期）；Windows 可执行文件带扩展名。
+    which(name).or_else(|| which(&format!("{name}.exe")))
 }
 
 /// 供 video command 取 sidecar 绝对路径（与 probe 共用同一查找逻辑）。
@@ -83,6 +85,33 @@ fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Return encoder names only from FFmpeg's machine-readable columns, not descriptions.
+fn parse_encoders(listing: &str) -> Vec<String> {
+    const SUPPORTED: &[&str] = &[
+        "h264_videotoolbox",
+        "h264_nvenc",
+        "h264_qsv",
+        "h264_amf",
+        "h264_vaapi",
+        "libx264",
+        "libvpx-vp9",
+        "libsvtav1",
+        "opus",
+        "libopus",
+        "libvorbis",
+    ];
+    listing
+        .lines()
+        .filter_map(|line| {
+            let name = line.split_whitespace().nth(1)?;
+            SUPPORTED
+                .iter()
+                .find(|&&supported| name == supported)
+                .map(|name| (*name).to_string())
+        })
+        .collect()
+}
+
 /// 跑 `ffmpeg -hide_banner -version`，解析版本行与 configure 行。
 pub fn probe() -> SidecarProbe {
     let mut p = SidecarProbe::default();
@@ -103,21 +132,7 @@ pub fn probe() -> SidecarProbe {
             .output()
         {
             let text = String::from_utf8_lossy(&out.stdout);
-            let hw = [
-                "h264_videotoolbox",
-                "h264_nvenc",
-                "h264_qsv",
-                "h264_amf",
-                "h264_vaapi",
-                "libx264",
-                "libvpx-vp9",
-                "libsvtav1",
-            ];
-            for name in hw {
-                if text.contains(name) {
-                    p.encoders.push(name.to_string());
-                }
-            }
+            p.encoders = parse_encoders(&text);
             p.hardware_encoder = p.encoders.iter().any(|e| e.starts_with("h264_"));
         }
         // 探测可用解码器（H.264/HEVC/VP9/AV1）。
@@ -158,4 +173,22 @@ pub fn info() -> serde_json::Value {
         "libreoffice": p.libreoffice_ok,
         "licenseRisk": p.gpl_risk,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_encoders_matches_encoder_names_not_descriptions() {
+        let listing = "Encoders:\n A..X.D opus                 Opus\n \
+                       A....D libopus              libopus Opus (codec opus)\n \
+                       A....D libvorbis            libvorbis (codec vorbis)\n \
+                       A..... other                description mentions libx264\n \
+                       V....D libx264rgb           libx264 H.264 RGB";
+        assert_eq!(
+            parse_encoders(listing),
+            vec!["opus", "libopus", "libvorbis"]
+        );
+    }
 }

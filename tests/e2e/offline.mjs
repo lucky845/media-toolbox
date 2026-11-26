@@ -14,8 +14,23 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 
-// ---- 1. 首次在线访问 ----
-await page.goto(`${base}/#/image`, { waitUntil: 'networkidle' });
+// ---- 1. 首次在线访问，延迟 SW 脚本以明确验证激活前后的文案 ----
+let releaseWorker;
+const workerGate = new Promise((resolve) => { releaseWorker = resolve; });
+await context.route('**/sw.js', async (route) => {
+  await workerGate;
+  await route.continue();
+});
+await page.goto(`${base}/#/help`, { waitUntil: 'domcontentloaded' });
+try {
+  await page.getByText('首次在线加载后可用（Service Worker 正在安装）', { exact: true })
+    .waitFor({ timeout: 15_000 });
+} finally {
+  releaseWorker();
+}
+await page.getByText('已缓存，可离线使用', { exact: true }).waitFor({ timeout: 15_000 });
+// Same-document hash navigation keeps the service worker activation sequence intact.
+await page.evaluate(() => { location.hash = '/image'; });
 await page.waitForSelector('.dropzone', { timeout: 20_000 });
 await page.waitForFunction(
   () => navigator.serviceWorker.controller !== null,

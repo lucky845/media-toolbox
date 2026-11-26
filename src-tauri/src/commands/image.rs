@@ -93,8 +93,10 @@ pub async fn image_process(
         }
     });
 
-    // 读文件（带阈值校验；桌面端阈值是「不限」，但仍走同一份代码路径）
-    let input = read_limited(&args.input_path, limits.max_bytes.max(u64::MAX / 8))?;
+    // 读文件（带阈值校验；桌面端阈值是「不限」，但仍走同一份代码路径）。
+    // 注意：不要写 `.max(u64::MAX / 8)` 之类的兜底 —— DESKTOP.max_bytes 本身就是
+    // u64::MAX/4，那个 max 恒等于后者，是把「不限」误读成「可能为 0」的遗迹。
+    let input = read_limited(&args.input_path, limits.max_bytes)?;
 
     let params = args.params.clone();
     let encode = args.encode.clone();
