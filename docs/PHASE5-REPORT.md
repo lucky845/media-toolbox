@@ -118,13 +118,17 @@ tag `v0.1.0` 触发 `release-desktop` workflow（run `45771792298`），三平�
 
 **Release 产物**（https://github.com/lucky845/media-toolbox/releases/tag/v0.1.0）：
 
+产物采用统一命名 `MediaToolbox_<版本>_<平台>-<架构><扩展名>`（由 `assetNamePattern`
+注入 `productName: MediaToolbox` 实现；旧版的中文 productName 被 sanitize 成空，
+导致 `_0.1.0_...` 前导下划线），Windows 也去掉了空格与 `zh-CN` locale 后缀：
+
 | 平台 | 文件 | 大小 |
 |---|---|---|
-| Windows x64 | `Media.Toolbox_0.1.0_x64_zh-CN.msi` | 114.8 MB |
-| macOS arm64 | `_0.1.0_aarch64.dmg` | 23.4 MB |
-| macOS arm64 | `_aarch64.app.tar.gz` | 23.4 MB |
-| Linux x64 | `_0.1.0_amd64.deb` | 125.9 MB |
-| Linux x64 | `_0.1.0_amd64.AppImage` | 192.1 MB |
+| Windows x64 | `MediaToolbox_0.1.0_win-x64.msi` | 114.8 MB |
+| macOS arm64 | `MediaToolbox_0.1.0_macos-arm64.dmg` | 23.4 MB |
+| macOS arm64 | `MediaToolbox_0.1.0_macos-arm64.app.tar.gz` | 23.4 MB |
+| Linux x64 | `MediaToolbox_0.1.0_linux-x64.deb` | 125.9 MB |
+| Linux x64 | `MediaToolbox_0.1.0_linux-x64.AppImage` | 192.1 MB |
 
 macOS 未签名（零成本约束），releaseBody 已写明首次打开方法。桌面版完全离线，FFmpeg 为
 档位 L（LGPL 无 libx264/x265），LibreOffice MPL-2.0，清单见 `THIRD_PARTY_NOTICES.md`。

@@ -15,9 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, target: aarch64-apple-darwin, label: macos-arm64 }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, label: windows-x64 }
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, label: linux-x64 }
+          - { os: macos-latest, target: aarch64-apple-darwin, label: macos-arm64, asset_pattern: "MediaToolbox_[version]_macos-arm64[ext]" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, label: windows-x64, asset_pattern: "MediaToolbox_[version]_win-x64[ext]" }
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, label: linux-x64, asset_pattern: "MediaToolbox_[version]_linux-x64[ext]" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -57,8 +57,6 @@ jobs:
 
       - name: 生成 release 用合并配置（base + sidecar externalBin）
         shell: bash
-        env:
-          MT_TARGET: ${{ matrix.target }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -70,9 +68,8 @@ jobs:
           icons = base['bundle'].setdefault('icon', [])
           if 'icons/icon.ico' not in icons:
               icons.append('icons/icon.ico')
-          # WiX(MSI) 用 code page 936，中文 productName 会触发 LGHT0311；Windows 用 ASCII 名。
-          if os.environ.get('MT_TARGET', '').startswith('x86_64-pc-windows'):
-              base['productName'] = 'Media Toolbox'
+          # productName 统一由 tauri-action 的 productName 输入注入（MediaToolbox，无空格），
+          # 同时解决 WiX code page 936 与文件名前导下划线问题，这里不再单独覆盖。
           json.dump(base, open('src-tauri/tauri.release.conf.json', 'w'))
           print('merged -> src-tauri/tauri.release.conf.json; productName =', base.get('productName'))
           PY
@@ -85,6 +82,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
+          productName: 'MediaToolbox'
+          assetNamePattern: ${{ matrix.asset_pattern }}
           releaseName: '本地多媒体工具箱 ${{ github.ref_name }}'
           releaseBody: |
             见 CHANGELOG.md。
