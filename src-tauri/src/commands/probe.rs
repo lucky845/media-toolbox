@@ -104,22 +104,44 @@ pub fn probe_capabilities() -> Result<Capabilities, ToolError> {
         },
         video: VideoCaps {
             available: side.ffmpeg_ok,
-            engines: if side.ffmpeg_ok { vec!["ffmpeg-sidecar"] } else { vec![] },
+            engines: if side.ffmpeg_ok {
+                vec!["ffmpeg-sidecar"]
+            } else {
+                vec![]
+            },
             decoders: side.decoders,
             encoders: side.encoders,
             hardware_encoder: side.hardware_encoder,
             max_bytes: -1,
             max_duration_sec: -1,
         },
-        pdf: PdfCaps { render: true, edit: true, max_pages: -1 },
+        pdf: PdfCaps {
+            render: true,
+            edit: true,
+            max_pages: -1,
+        },
         office: OfficeCaps {
             // LibreOffice 存在 → native；否则结构化（与 Web 同档，但 UI 会常驻提示）
-            word_to_pdf: if side.libreoffice_ok { "native" } else { "structured" },
-            pdf_to_word: if side.libreoffice_ok { "native" } else { "structured" },
+            word_to_pdf: if side.libreoffice_ok {
+                "native"
+            } else {
+                "structured"
+            },
+            pdf_to_word: if side.libreoffice_ok {
+                "native"
+            } else {
+                "structured"
+            },
         },
         cancel: CancelCaps { hard: true },
-        file_system: FileSystemCaps { directory_picker: true, save_picker: true },
-        offline: OfflineCaps { service_worker: false, installed: true },
+        file_system: FileSystemCaps {
+            directory_picker: true,
+            save_picker: true,
+        },
+        offline: OfflineCaps {
+            service_worker: false,
+            installed: true,
+        },
         env: EnvCaps {
             user_agent_major: String::new(),
             cross_origin_isolated: true,

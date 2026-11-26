@@ -303,4 +303,15 @@ export interface Backend {
    * 放在接口上而不是让 UI 去 import 具体类是刻意的 —— 否则 features/ 就会依赖 Web 实现。
    */
   probe?(ref: InputRef): Promise<unknown>;
+  /** 视频探测（只解元数据）：Web 走 mp4box，桌面走 ffprobe。返回 VideoProbeResult。 */
+  probeVideo?(ref: InputRef): Promise<VideoProbeResult>;
+}
+
+/** 视频转码结果元数据（两端同形状） */
+export interface VideoResultMeta {
+  outputPath?: string;
+  outFormat: 'mp4' | 'webm';
+  outWidth: number;
+  outHeight: number;
+  durationSec: number;
 }

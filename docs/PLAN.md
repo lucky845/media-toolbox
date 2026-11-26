@@ -166,12 +166,18 @@ Phase 4b（待做）：WebCodecs 转码管线、pdf.js 按页渲染+虚拟化、
 
 ---
 
-## Phase 5 — Tauri 全量 ⬜
+## Phase 5 — Tauri 全量 🔶 进行中（视频纵切已交付）
 
-- FFmpeg sidecar（`fetch-sidecars.mjs` 已写好，macOS 需本地编译）
-- LibreOffice headless
-- 硬件编码探测（`sidecar.rs` 已实现探测逻辑）
-- 三平台打包（`release-desktop.yml` 已写好）
+- [x] 决策：档位 L（LGPL 无 libx264）/ 先做视频纵切 / PDF 渲染复用 pdf.js（见 `PHASE5-REPORT.md`）
+- [x] native 进程执行层 `crates/native/src/process.rs`（进度换算 / 进程树 kill / 中文错误）
+- [x] 视频 command `src-tauri/src/commands/video.rs`（probe/transcode/extract_frame/extract_audio）
+- [x] 档位 L 硬件编码选择 + sidecar 编解码器探测
+- [x] 前端零分叉：`Backend.probeVideo` + VideoPage 走 getBackend（不再 import Web 实现）
+- [x] 本机验证：212 Rust 测试 / 4 Tauri command 测试 / 6 e2e / Tauri 二进制构建+启动
+- [ ] PDF 高 DPI 阈值放宽（复用 pdf.js，仅 capabilities 调整）
+- [ ] LibreOffice headless Word↔PDF command
+- [ ] 三平台 Release 实测出包（tag 触发 CI，本机无完整 Xcode 不出 dmg）
+- [ ] 视频批量队列接入桌面并行
 
 ## Phase 6 — 一致性、基准、许可证、README ⬜
 

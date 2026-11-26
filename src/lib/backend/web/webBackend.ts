@@ -7,6 +7,7 @@
 
 import { warmWasm } from './wasmLoader';
 import { getVideoBackend, videoCodecSupport } from './videoBackend';
+import type { VideoProbeResult } from '../types';
 import {
   PROTOCOL_VERSION,
   isTerminal,
@@ -412,6 +413,12 @@ export class WebBackend implements Backend_ {
         [buf],
       );
     });
+  }
+
+  /** 视频探测（Web 侧由 mp4box 解封装，主线程，无字节进 wasm） */
+  async probeVideo(ref: InputRef): Promise<VideoProbeResult> {
+    if (!ref.file) throw new Error('视频探测需要浏览器文件对象');
+    return getVideoBackend().probe(ref);
   }
 
   async pickFiles(accept: string, multiple: boolean): Promise<InputRef[]> {

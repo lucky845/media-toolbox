@@ -43,6 +43,11 @@ fn sidecar_path(name: &str) -> Option<PathBuf> {
     which(name)
 }
 
+/// 供 video command 取 sidecar 绝对路径（与 probe 共用同一查找逻辑）。
+pub fn binary_path(name: &str) -> Option<PathBuf> {
+    sidecar_path(name)
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -59,16 +64,57 @@ pub fn probe() -> SidecarProbe {
     let mut p = SidecarProbe::default();
 
     if let Some(ffmpeg) = sidecar_path("ffmpeg") {
-        if let Ok(out) = Command::new(&ffmpeg).args(["-hide_banner", "-version"]).output() {
+        if let Ok(out) = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-version"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&out.stdout);
             p.ffmpeg_ok = out.status.success();
             p.ffmpeg_version = text.lines().next().map(|s| s.trim().to_string());
             p.gpl_risk = text.contains("--enable-gpl") || text.contains("--enable-nonfree");
         }
+        // 探测可用编码器（档位 L 据此决定 H.264 走系统硬件编码还是报错引导）。
+        if let Ok(out) = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-encoders"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let hw = [
+                "h264_videotoolbox",
+                "h264_nvenc",
+                "h264_qsv",
+                "h264_amf",
+                "h264_vaapi",
+                "libx264",
+                "libvpx-vp9",
+                "libsvtav1",
+            ];
+            for name in hw {
+                if text.contains(name) {
+                    p.encoders.push(name.to_string());
+                }
+            }
+            p.hardware_encoder = p.encoders.iter().any(|e| e.starts_with("h264_"));
+        }
+        // 探测可用解码器（H.264/HEVC/VP9/AV1）。
+        if let Ok(out) = Command::new(&ffmpeg)
+            .args(["-hide_banner", "-decoders"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for name in ["h264", "hevc", "vp9", "av1"] {
+                if text.contains(name) {
+                    p.decoders.push(name.to_string());
+                }
+            }
+        }
     }
 
     if let Some(ffprobe) = sidecar_path("ffprobe") {
-        if let Ok(out) = Command::new(&ffprobe).args(["-hide_banner", "-version"]).output() {
+        if let Ok(out) = Command::new(&ffprobe)
+            .args(["-hide_banner", "-version"])
+            .output()
+        {
             p.ffprobe_ok = out.status.success();
         }
     }
@@ -87,7 +133,10 @@ pub fn probe() -> SidecarProbe {
     #[cfg(all(unix, not(target_os = "macos")))]
     let lo_candidates = ["/usr/bin/soffice", "soffice"];
 
-    p.libreoffice_ok = lo_candidates.iter().any(|c| std::path::Path::new(c).exists()) || which("soffice").is_some();
+    p.libreoffice_ok = lo_candidates
+        .iter()
+        .any(|c| std::path::Path::new(c).exists())
+        || which("soffice").is_some();
 
     p
 }

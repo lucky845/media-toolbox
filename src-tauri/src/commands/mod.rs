@@ -1,5 +1,6 @@
 pub mod image;
 pub mod probe;
+pub mod video;
 
 use media_native::cancel::TaskRegistry;
 use media_ports::ToolError;

@@ -7,6 +7,7 @@
 
 pub mod cancel;
 pub mod parallel;
+pub mod process;
 pub mod sink;
 pub mod util;
 

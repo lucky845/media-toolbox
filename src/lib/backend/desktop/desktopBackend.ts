@@ -24,6 +24,8 @@ import type {
   TaskPayload,
   TaskResult,
   ToolError,
+  VideoProbeResult,
+  VideoResultMeta,
 } from '../types';
 
 interface DesktopProgressEvent {
@@ -147,6 +149,43 @@ export class DesktopBackend implements Backend {
         };
       }
 
+      if (task.kind === 'video.transcode') {
+        // 桌面：ffprobe 探测 + FFmpeg sidecar 转码，输出路径由 Rust 决定（不经过 JS 字节）。
+        if (!task.input.path) {
+          throw {
+            code: 'INVALID_PARAMS',
+            message: '桌面端需要文件路径',
+            retryable: false,
+            desktopHint: false,
+          } satisfies ToolError;
+        }
+        const p = task.params;
+        const r = await invoke<VideoResultMeta & { outputPath: string }>('video_transcode', {
+          inputPath: task.input.path,
+          container: p.container,
+          bitrateMbps: p.bitrateMbps,
+          scalePercent: p.scalePercent,
+          fps: p.fps > 0 ? p.fps : undefined,
+          keepAudio: p.keepAudio,
+          taskId: opts.taskId,
+        });
+        // 桌面转码已写盘；只回传一个空字节占位（预览/保存由 UI 用 outputPath 处理）。
+        return {
+          bytes: new Uint8Array(0),
+          meta: {
+            outFormat: p.container,
+            outWidth: r.outWidth,
+            outHeight: r.outHeight,
+            inputBytes: task.input.size,
+            outputBytes: 0,
+            outputHash: '',
+            savingsRatio: 0,
+            savingsText: `已写入 ${r.outputPath.split(/[\\/]/).pop() ?? '文件'}`,
+          },
+          outputName: r.outputPath.split(/[\\/]/).pop() ?? 'video',
+        };
+      }
+
       throw {
         code: 'UNSUPPORTED_FORMAT',
         message: `当前版本暂不支持 ${task.kind}`,
@@ -158,6 +197,37 @@ export class DesktopBackend implements Backend {
       this.logHandlers.delete(opts.taskId);
       this.running.delete(opts.taskId);
     }
+  }
+
+  /** 视频探测：桌面走 ffprobe command（只解元数据） */
+  async probeVideo(ref: InputRef): Promise<VideoProbeResult> {
+    if (!ref.path) {
+      throw {
+        code: 'INVALID_PARAMS',
+        message: '桌面端视频探测需要文件路径',
+        retryable: false,
+        desktopHint: false,
+      } satisfies ToolError;
+    }
+    const r = await invoke<{
+      codec: string;
+      width: number;
+      height: number;
+      durationSec: number;
+      formatName: string;
+      hasAudio: boolean;
+    }>('video_probe', { inputPath: ref.path });
+    return {
+      codec: r.codec,
+      width: r.width,
+      height: r.height,
+      durationSec: r.durationSec,
+      // ffprobe 探测里未取 r_frame_rate；桌面端不以它作为限制判断，置 0 表示未知。
+      frameRate: 0,
+      hasAudio: r.hasAudio,
+      // 桌面走 FFmpeg 可重编码音频，不依赖无损透传。
+      audioPassthrough: true,
+    };
   }
 
   cancel(taskId: string): void {
@@ -185,6 +255,8 @@ export class DesktopBackend implements Backend {
   }
 
   async saveOutput(bytes: Uint8Array, name: string): Promise<'downloaded' | 'saved' | 'cancelled'> {
+    // 桌面 command（视频等）可能已由 Rust 直接写盘，回传空字节占位；此时不再弹保存框。
+    if (bytes.length === 0) return 'saved';
     const target = await saveDialog({ defaultPath: name });
     if (!target) return 'cancelled';
     await invoke('write_output_file', { path: target, data: Array.from(bytes) });

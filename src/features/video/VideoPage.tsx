@@ -3,7 +3,6 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { DesktopCta, LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
-import { getVideoBackend } from '../../lib/backend/web/videoBackend';
 import { DESKTOP_RELEASE_URL, formatBytes } from '../../lib/errors';
 import type { InputRef, Progress, ToolError, VideoProbeResult } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
@@ -40,7 +39,9 @@ export function VideoPage() {
     setFile(ref);
     setBusy(true);
     try {
-      setProbe(await getVideoBackend().probe(ref));
+      const backend = await getBackend();
+      if (!backend.probeVideo) throw new Error('当前形态不支持视频探测');
+      setProbe(await backend.probeVideo(ref));
     } catch (e) {
       setError(e as ToolError);
     } finally {

@@ -67,7 +67,11 @@ pub async fn image_process(
     // 用原子而不是捕获变量：ProgressSink 要求 Fn + Sync（rayon 多线程会并发上报）
     let last_pct = std::sync::atomic::AtomicI32::new(-1);
     let progress = ProgressReporter::new(move |p: Progress| {
-        let pct = if p.total > 0 { (p.done as f64 / p.total as f64 * 100.0) as i32 } else { -1 };
+        let pct = if p.total > 0 {
+            (p.done as f64 / p.total as f64 * 100.0) as i32
+        } else {
+            -1
+        };
         // 只在百分比变化时发事件：100 段接收方不会因为每像素一次而被打爆
         if last_pct.swap(pct, std::sync::atomic::Ordering::Relaxed) != pct {
             let _ = app_for_progress.emit(
@@ -161,14 +165,12 @@ pub async fn image_process(
 #[tauri::command]
 pub fn read_output_preview(path: String) -> Result<Vec<u8>, ToolError> {
     const MAX_PREVIEW: u64 = 8 * 1024 * 1024; // 8 MB
-    let meta = std::fs::metadata(&path)
-        .map_err(|e| ToolError::io(format!("读取失败: {e}")))?;
+    let meta = std::fs::metadata(&path).map_err(|e| ToolError::io(format!("读取失败: {e}")))?;
     if meta.len() > MAX_PREVIEW {
-        return Err(ToolError::new(
-            media_ports::ErrorCode::InputTooLarge,
-            &[("limit", "8 MB")],
-        )
-        .with_detail("预览文件过大；完整文件已写入磁盘，可用系统查看器打开"));
+        return Err(
+            ToolError::new(media_ports::ErrorCode::InputTooLarge, &[("limit", "8 MB")])
+                .with_detail("预览文件过大；完整文件已写入磁盘，可用系统查看器打开"),
+        );
     }
     std::fs::read(&path).map_err(|e| ToolError::io(format!("读取失败: {e}")))
 }

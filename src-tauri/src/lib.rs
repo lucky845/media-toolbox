@@ -33,6 +33,10 @@ pub fn run() {
             commands::image::image_process,
             commands::image::read_output_preview,
             commands::image::write_output_file,
+            commands::video::video_probe,
+            commands::video::video_transcode,
+            commands::video::video_extract_frame,
+            commands::video::video_extract_audio,
             commands::cancel_task,
             commands::sidecar_info,
         ])
