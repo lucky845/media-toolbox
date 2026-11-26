@@ -57,9 +57,11 @@ jobs:
 
       - name: 生成 release 用合并配置（base + sidecar externalBin）
         shell: bash
+        env:
+          MT_TARGET: ${{ matrix.target }}
         run: |
           python3 - <<'PY'
-          import json
+          import json, os
           base = json.load(open('src-tauri/tauri.conf.json'))
           side = json.load(open('src-tauri/tauri.sidecar.conf.json'))
           for k, v in side.get('bundle', {}).items():
@@ -68,8 +70,11 @@ jobs:
           icons = base['bundle'].setdefault('icon', [])
           if 'icons/icon.ico' not in icons:
               icons.append('icons/icon.ico')
+          # WiX(MSI) 用 code page 936，中文 productName 会触发 LGHT0311；Windows 用 ASCII 名。
+          if os.environ.get('MT_TARGET', '').startswith('x86_64-pc-windows'):
+              base['productName'] = 'Media Toolbox'
           json.dump(base, open('src-tauri/tauri.release.conf.json', 'w'))
-          print('merged -> src-tauri/tauri.release.conf.json')
+          print('merged -> src-tauri/tauri.release.conf.json; productName =', base.get('productName'))
           PY
 
       - name: 构建前端
