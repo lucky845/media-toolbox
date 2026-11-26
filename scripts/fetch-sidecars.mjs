@@ -158,7 +158,9 @@ async function main() {
       '--disable-doc', '--disable-debug',
       '--enable-ffmpeg', '--enable-ffprobe',
       '--enable-videotoolbox', '--enable-audiotoolbox',
-      '--enable-libvpx', '--enable-libsvtav1',
+      '--enable-libvpx',
+      // 不启用 libsvtav1：FFmpeg n7.1 的 libsvtav1 wrapper 与新 Homebrew SVT-AV1 API 不兼容
+      // （enable_adaptive_quantization 字段已移除）；AV1 编码对档位 L 非必需，H.264 走 VideoToolbox。
       // 安全：显式不启用任何 GPL/nonfree 组件（configure 默认即关闭，这里写明便于审计）
       '--disable-gpl', '--disable-nonfree',
     ];

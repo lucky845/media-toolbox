@@ -45,7 +45,7 @@ jobs:
 
       - name: macOS FFmpeg 编译依赖
         if: matrix.os == 'macos-latest'
-        run: brew install nasm pkg-config libvpx svt-av1
+        run: brew install nasm pkg-config libvpx
 
       - run: npm ci
 
