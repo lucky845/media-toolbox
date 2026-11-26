@@ -52,6 +52,19 @@ jobs:
       - name: 拉取并校验 sidecar（FFmpeg/ffprobe，校验 sha256）
         run: node scripts/fetch-sidecars.mjs --target ${{ matrix.target }}
 
+      - name: 生成 release 用合并配置（base + sidecar externalBin）
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          base = json.load(open('src-tauri/tauri.conf.json'))
+          side = json.load(open('src-tauri/tauri.sidecar.conf.json'))
+          for k, v in side.get('bundle', {}).items():
+              base.setdefault('bundle', {}).setdefault(k, v)
+          json.dump(base, open('src-tauri/tauri.release.conf.json', 'w'))
+          print('merged -> src-tauri/tauri.release.conf.json')
+          PY
+
       - name: 构建前端
         run: npx vite build
 
@@ -70,4 +83,4 @@ jobs:
 
             **许可证**：桌面版捆绑的 FFmpeg 为 LGPL-2.1-or-later 构建（不含 libx264/x265），
             LibreOffice 为 MPL-2.0。完整清单见仓库的 THIRD_PARTY_NOTICES.md。
-          args: --target ${{ matrix.target }} --config src-tauri/tauri.sidecar.conf.json
+          args: --target ${{ matrix.target }} --config "${{ github.workspace }}/src-tauri/tauri.release.conf.json"

@@ -18,6 +18,8 @@ crates/wasm/pkg/
 # --- 桌面 sidecar 二进制（构建期拉取，不进仓库）---
 src-tauri/sidecar/**/*
 !src-tauri/sidecar/README.md
+# release 用合并配置（CI 构建期生成）
+src-tauri/tauri.release.conf.json
 
 # --- 字体产物（构建期子集化生成）---
 public/fonts/*.woff2

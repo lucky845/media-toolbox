@@ -33,18 +33,21 @@ const log = (...a) => console.error(...a);
  * 这是 Phase 5 的具体风险，已在 docs/BUDGET.md §5 记录。
  */
 const SOURCES = {
+  // 用**静态** lgpl 构建（-lgpl，非 -lgpl-shared）：动态版缺 libavdevice.so 等运行库，
+  // 在本机核验 configure 行时会直接失败；静态版体积大 ~20–30 MB 但零外部依赖。
+  // 不用写死版本号/URL —— 用 GitHub API 在 latest 发布里按模式匹配当前资产名，
+  // 否则 BtbN 升级 FFmpeg 版本后固定 URL 会 404（2026-11 实测 7.1 已失效）。
   'x86_64-pc-windows-msvc': {
-    // BtbN 的 lgpl-shared 构建：动态链接，体积小，且符合 LGPL 的「可替换库」要求。
-    // 不用写死版本号/URL —— 用 GitHub API 在 latest 发布里按模式匹配当前资产名，
-    // 否则 BtbN 升级 FFmpeg 版本后固定 URL 会 404（2026-11 实测 7.1 已失效）。
-    apiMatch: 'win64-lgpl-shared',
+    apiMatch: 'win64-lgpl-',
+    apiExclude: 'lgpl-shared',
     kind: 'zip',
-    note: 'BtbN lgpl-shared（无 --enable-gpl / --enable-nonfree；版本动态解析）',
+    note: 'BtbN 静态 lgpl（无 gpl/nonfree；版本动态解析）',
   },
   'x86_64-unknown-linux-gnu': {
-    apiMatch: 'linux64-lgpl-shared',
+    apiMatch: 'linux64-lgpl-',
+    apiExclude: 'lgpl-shared',
     kind: 'tar.xz',
-    note: 'BtbN lgpl-shared（版本动态解析）',
+    note: 'BtbN 静态 lgpl（版本动态解析）',
   },
   'aarch64-apple-darwin': {
     url: null,
@@ -190,7 +193,8 @@ async function main() {
   const rel = JSON.parse(execFileSync('curl', [
     '-fsSL', 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest',
   ], { encoding: 'utf8' }));
-  const asset = rel.assets.find((a) => a.name.includes(src.apiMatch));
+  const asset = rel.assets.find((a) =>
+    a.name.includes(src.apiMatch) && !(src.apiExclude && a.name.includes(src.apiExclude)));
   if (!asset) {
     log(`✗ 在 BtbN latest 发布里找不到匹配 ${src.apiMatch} 的资产（发布 ${rel.tag_name}）`);
     process.exit(1);
