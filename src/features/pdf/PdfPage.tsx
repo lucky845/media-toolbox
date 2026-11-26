@@ -1,18 +1,17 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
-import { getDocBackend } from '../../lib/backend/web/docBackend';
+import { getBackend } from '../../lib/backend';
+import { useCapabilities } from '../../store/capabilities';
 import { PdfPreview } from './PdfPreview';
-import { formatBytes } from '../../lib/errors';
-import type { InputRef, PageRange, ToolError } from '../../lib/backend/types';
-interface PdfMeta {
-  pages: number;
-  bytes: number;
-  encrypted: boolean;
-  version: string;
+import { formatBytes, isToolError } from '../../lib/errors';
+import type { InputRef, PageRange, PdfMeta, ToolError } from '../../lib/backend/types';
+
+function pdfError(error: unknown): ToolError {
+  if (isToolError(error)) return error;
+  return { code: 'IO', message: error instanceof Error ? error.message : String(error), retryable: true, desktopHint: false };
 }
-const probePdfFile = async (f: File) => await getDocBackend().probe({ file: f, name: f.name, size: f.size }) as Promise<PdfMeta>;
 
 const ACCEPT = '.pdf';
 
@@ -32,30 +31,33 @@ export function PdfPage() {
   const [outputStatus, setOutputStatus] = useState('');
   const [probing, setProbing] = useState(false);
   const selectionVersion = useRef(0);
+  const nativePicker = useCapabilities((state) => state.caps?.fileSystem.nativeFilePicker);
 
-  const onFiles = useCallback(async (fs: File[]) => {
+  const onFiles = useCallback(async (refs: InputRef[]) => {
     const version = ++selectionVersion.current;
     setError(null);
     setMeta(null);
     setResult(null);
     setExtracted(null);
     setOutputStatus('');
-    setFiles(fs.map((file) => ({ file, name: file.name, size: file.size })));
-    const first = fs[0];
+    setFiles(refs);
+    const first = refs[0];
     setProbing(!!first);
     if (!first) return;
     try {
-      const nextMeta = await probePdfFile(first);
+      const backend = await getBackend();
+      if (!backend.probePdf) throw new Error('当前后端不支持 PDF 探测');
+      const nextMeta = await backend.probePdf(first);
       if (version === selectionVersion.current) setMeta(nextMeta);
     } catch (e) {
-      if (version === selectionVersion.current) setError(e as ToolError);
+      if (version === selectionVersion.current) setError(pdfError(e));
     } finally {
       if (version === selectionVersion.current) setProbing(false);
     }
   }, []);
 
   function moveFile(index: number, offset: number) {
-    const ordered = files.flatMap((ref) => ref.file ? [ref.file] : []);
+    const ordered = [...files];
     const file = ordered[index];
     const target = ordered[index + offset];
     if (!file || !target) return;
@@ -65,9 +67,33 @@ export function PdfPage() {
   }
 
   const pick = useCallback(async () => {
-    const refs = await getDocBackend().pickFiles(ACCEPT, true);
-    if (refs.length) await onFiles(refs.map((r) => r.file!).filter(Boolean));
+    try {
+      const refs = await (await getBackend()).pickFiles(ACCEPT, true);
+      if (refs.length) await onFiles(refs);
+    } catch (e) {
+      setError(pdfError(e));
+    }
   }, [onFiles]);
+
+  const first = files[0];
+  const [localPreview, setLocalPreview] = useState<{ input: InputRef; file: File }>();
+  useEffect(() => {
+    if (action !== 'render' || !first?.path || !meta || meta.encrypted) return;
+    let current = true;
+    setLocalPreview(undefined);
+    void (async () => {
+      try {
+        const backend = await getBackend();
+        if (!backend.readPdf) throw new Error('当前后端不支持 PDF 预览');
+        const bytes = await backend.readPdf(first);
+        if (current) setLocalPreview({ input: first, file: new File([bytes], first.name, { type: 'application/pdf' }) });
+      } catch (e) {
+        if (current) setError(pdfError(e));
+      }
+    })();
+    return () => { current = false; };
+  }, [action, first, meta]);
+  const previewFile = first?.file ?? (localPreview?.input === first ? localPreview?.file : undefined);
 
   const parseRanges = (): PageRange[] | null => {
     if (!rangeText.trim()) return action === 'split' ? null : [];
@@ -89,7 +115,7 @@ export function PdfPage() {
     setError(null);
     try {
       const name = `${outputFileName}.txt`;
-      const outcome = await getDocBackend().saveOutput(extracted, name);
+      const outcome = await (await getBackend()).saveOutput(extracted, name, { directDownload: true });
       if (outcome !== 'cancelled') setOutputStatus(`已导出 ${name}`);
     } catch {
       setError({ code: 'IO', message: '无法导出 TXT，请重试', retryable: true, desktopHint: false });
@@ -99,14 +125,13 @@ export function PdfPage() {
   const outputFileName = files[0]?.name.replace(/\.pdf$/i, '') || 'document';
 
   async function run() {
-    if (!files[0] || !meta || busy || probing || action === 'render') return;
+    if (!files[0] || !meta || meta.encrypted || busy || probing || action === 'render') return;
     setOutputStatus('');
     setBusy(true);
     setError(null);
     setResult(null);
     setExtracted(null);
-    const backend = getDocBackend();
-    const id = `pdf-${Date.now().toString(36)}`;
+    const id = `pdf-${crypto.randomUUID()}`;
     const ac = new AbortController();
     const ranges = action === 'merge' ? [] : parseRanges();
     if (!ranges) {
@@ -144,20 +169,36 @@ export function PdfPage() {
     }
 
     try {
+      const backend = await getBackend();
       const out = await backend.run(task!, {
         taskId: id,
         signal: ac.signal,
         onProgress: () => {},
       });
       if (action === 'extractText') {
-        setExtracted(out.bytes);
-        setResult(`已提取 ${out.bytes.length} 字节文本`);
+        const textBytes = out.text ? new TextEncoder().encode(out.text) : out.bytes;
+        setExtracted(textBytes);
+        setResult(`已提取 ${textBytes.length} 字节文本`);
+      } else if (out.savedOutputs) {
+        const [firstOutput] = out.savedOutputs;
+        setResult(firstOutput
+          ? `已生成 ${firstOutput.path}${out.savedOutputs.length > 1 ? `（共 ${out.savedOutputs.length} 个文件）` : ''}`
+          : '选定页面没有可提取的嵌入图片');
       } else {
-        await backend.saveOutput(out.bytes, out.outputName);
-        setResult(`已生成 ${out.outputName}（${formatBytes(out.bytes.length)}）`);
+        const outputs = out.outputs ?? [{ bytes: out.bytes, name: out.outputName }];
+        if (outputs.length === 0) {
+          setResult('选定页面没有可提取的嵌入图片');
+          return;
+        }
+        let saved = 0;
+        for (const item of outputs) {
+          if (await backend.saveOutput(item.bytes, item.name, { directDownload: true }) !== 'cancelled') saved++;
+        }
+        if (outputs.length === 1 && saved) setResult(`已生成 ${out.outputName}（${formatBytes(out.bytes.length)}）`);
+        else if (saved) setResult(`已导出 ${saved} / ${outputs.length} 个文件`);
       }
     } catch (e) {
-      setError(e as ToolError);
+      setError(pdfError(e));
     } finally {
       setBusy(false);
     }
@@ -167,7 +208,12 @@ export function PdfPage() {
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>导入 PDF</h2>
-        <DropZone accept={ACCEPT} onFiles={onFiles} onPick={pick} multiple disabled={busy} />
+        {nativePicker ? (
+          <button type="button" onClick={() => void pick()} disabled={busy}>选择 PDF 文件</button>
+        ) : (
+          <DropZone accept={ACCEPT} onFiles={(items) => void onFiles(items.map((file) => ({ file, name: file.name, size: file.size })))}
+            onPick={pick} multiple disabled={busy} />
+        )}
         {action === 'merge' && files.length > 1 && (
           <ol aria-label="PDF 合并顺序" style={{ margin: '12px 0 0', paddingLeft: 22 }}>
             {files.map((file, index) => (
@@ -243,7 +289,7 @@ export function PdfPage() {
 
         {action !== 'render' && (
           <div className="row" style={{ marginTop: 16 }}>
-            <button className="primary" onClick={run} disabled={!meta || busy || probing || (action === 'merge' && files.length < 2)}>
+            <button className="primary" onClick={run} disabled={!meta || meta.encrypted || busy || probing || (action === 'merge' && files.length < 2)}>
               {busy ? '处理中…' : '执行'}
             </button>
           </div>
@@ -255,11 +301,11 @@ export function PdfPage() {
         )}
       </div>
 
-      {action === 'render' && files[0]?.file && meta && (
-        <PdfPreview file={files[0].file} pageCount={meta.pages} onError={setError} />
+      {action === 'render' && previewFile && meta && !meta.encrypted && (
+        <PdfPreview file={previewFile} pageCount={meta.pages} onError={setError} />
       )}
-      {action === 'render' && !meta && (
-        <div className="card"><span className="hint">正在探测 PDF 页数…</span></div>
+      {action === 'render' && !previewFile && !error && !meta?.encrypted && (
+        <div className="card"><span className="hint">{first ? '正在读取 PDF…' : '请选择 PDF 文件'}</span></div>
       )}
 
       <div role="status" hidden={!outputStatus && !result}>
@@ -290,9 +336,8 @@ export function PdfPage() {
         </div>
       )}
 
-      <LimitNotice kind="fidelity" title="PDF 在线处理说明">
-        旋转、拆分、合并与提取在浏览器内以字节级方式完成。PDF→图片渲染已在浏览器内用 pdf.js
-        逐页完成（≤100 页、按页虚拟化、受内存上限保护）；更高 DPI 的批量导出请到桌面版。PDF↔Word
+      <LimitNotice kind="fidelity" title="PDF 处理说明">
+        旋转、拆分、合并与提取均在本机完成。桌面版的 PDF 文件输出保存到列表首份文件所在目录。PDF→图片由 PDF.js 逐页渲染。PDF↔Word
         高保真转换需桌面版；在线版只做结构化处理。
       </LimitNotice>
     </div>

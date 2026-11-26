@@ -168,7 +168,7 @@ export interface Capabilities {
   pdf: PdfCaps;
   office: OfficeCaps;
   cancel: { hard: boolean };
-  fileSystem: { directoryPicker: boolean; savePicker: boolean };
+  fileSystem: { directoryPicker: boolean; savePicker: boolean; nativeFilePicker?: boolean };
   offline: { serviceWorker: boolean; installed: boolean };
   env: { userAgentMajor: string; crossOriginIsolated: boolean };
 }
@@ -210,6 +210,13 @@ export interface InputRef {
   path?: string;
   name: string;
   size: number;
+}
+
+export interface PdfMeta {
+  pages: number;
+  bytes: number;
+  encrypted: boolean;
+  version: string;
 }
 
 export interface PageRange {
@@ -287,6 +294,7 @@ export interface TaskResult {
   outputName: string;
   /** 多文件输出（PDF 拆分 / 图片提取）时填充 */
   outputs?: Array<{ name: string; bytes: Uint8Array }>;
+  savedOutputs?: Array<{ name: string; path: string; bytes: number }>;
   /** 文本输出（PDF 提取文本）时填充 */
   text?: string;
 }
@@ -300,7 +308,7 @@ export interface Backend {
   /** 打开文件选择；Web 用 input，桌面用系统对话框 */
   pickFiles(accept: string, multiple: boolean): Promise<InputRef[]>;
   /** 保存结果：Web 触发下载，桌面写文件 */
-  saveOutput(bytes: Uint8Array, name: string): Promise<'downloaded' | 'saved' | 'cancelled'>;
+  saveOutput(bytes: Uint8Array, name: string, options?: { directDownload?: boolean }): Promise<'downloaded' | 'saved' | 'cancelled'>;
   /** 释放资源（worker / 事件监听） */
   dispose(): void;
   /**
@@ -308,6 +316,10 @@ export interface Backend {
    * 放在接口上而不是让 UI 去 import 具体类是刻意的 —— 否则 features/ 就会依赖 Web 实现。
    */
   probe?(ref: InputRef): Promise<unknown>;
+  /** PDF 结构探测：Web 与 Tauri 共用统一页面流程。 */
+  probePdf?(ref: InputRef): Promise<PdfMeta>;
+  /** PDF 图片预览读取：桌面端从本地路径读取，Web 直接使用 File。 */
+  readPdf?(ref: InputRef): Promise<ArrayBuffer>;
   /** 视频探测（只解元数据）：Web 走 mp4box，桌面走 ffprobe。返回 VideoProbeResult。 */
   probeVideo?(ref: InputRef): Promise<VideoProbeResult>;
 }

@@ -17,6 +17,7 @@ import type {
   Capabilities,
   ImageResultMeta,
   InputRef,
+  PdfMeta,
   Limits,
   LogEntry,
   Progress,
@@ -149,6 +150,33 @@ export class DesktopBackend implements Backend {
         };
       }
 
+      if (task.kind === 'pdf.merge' || task.kind === 'pdf.split' || task.kind === 'pdf.rotate' || task.kind === 'pdf.extract') {
+        const requirePath = (ref: InputRef) => {
+          if (ref.path) return ref.path;
+          throw { code: 'INVALID_PARAMS', message: '桌面端 PDF 操作需要文件路径', retryable: false, desktopHint: false } satisfies ToolError;
+        };
+        let request: Record<string, unknown>;
+        let inputBytes: number;
+        if (task.kind === 'pdf.merge') {
+          request = { kind: task.kind, inputPaths: task.inputs.map(requirePath), taskId: opts.taskId };
+          inputBytes = task.inputs.reduce((n, ref) => n + ref.size, 0);
+        } else {
+          const { input, ...operation } = task;
+          request = { ...operation, inputPath: requirePath(input), taskId: opts.taskId };
+          inputBytes = input.size;
+        }
+        const r = await invoke<{ outputName: string; outputs: Array<{ name: string; path: string; bytes: number }>; text?: string }>('pdf_run', { request });
+        return {
+          bytes: new Uint8Array(0), text: r.text, outputName: r.outputName,
+          savedOutputs: r.outputs,
+          meta: {
+            outFormat: 'pdf', outWidth: 0, outHeight: 0, inputBytes,
+            outputBytes: r.outputs.reduce((n, out) => n + out.bytes, 0),
+            outputHash: '', savingsRatio: 0, savingsText: `已写入 ${r.outputName}`,
+          },
+        };
+      }
+
       if (task.kind === 'office.convert') {
         // 桌面：LibreOffice headless 原生转换，输出路径由 Rust 决定并已写盘。
         if (!task.input.path) {
@@ -224,10 +252,17 @@ export class DesktopBackend implements Backend {
         desktopHint: false,
       } satisfies ToolError;
     } finally {
+      opts.signal.removeEventListener('abort', onAbort);
       this.progressHandlers.delete(opts.taskId);
       this.logHandlers.delete(opts.taskId);
       this.running.delete(opts.taskId);
     }
+  }
+
+  /** PDF 探测：桌面读取路径，Rust 只返回元数据。 */
+  async probePdf(ref: InputRef): Promise<PdfMeta> {
+    if (!ref.path) throw { code: 'INVALID_PARAMS', message: '桌面端 PDF 探测需要文件路径', retryable: false, desktopHint: false } satisfies ToolError;
+    return invoke('pdf_probe', { inputPath: ref.path });
   }
 
   /** 视频探测：桌面走 ffprobe command（只解元数据） */
@@ -283,6 +318,11 @@ export class DesktopBackend implements Backend {
       name: p.split(/[\\/]/).pop() ?? p,
       size: 0, // 大小由 Rust 侧探测后回填
     }));
+  }
+
+  async readPdf(ref: InputRef): Promise<ArrayBuffer> {
+    if (!ref.path) throw { code: 'INVALID_PARAMS', message: 'PDF 预览需要文件路径', retryable: false, desktopHint: false } satisfies ToolError;
+    return invoke('pdf_read_preview', { inputPath: ref.path });
   }
 
   async saveOutput(bytes: Uint8Array, name: string): Promise<'downloaded' | 'saved' | 'cancelled'> {

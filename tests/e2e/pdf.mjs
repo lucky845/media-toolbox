@@ -60,6 +60,39 @@ try {
   await page.getByRole('button', { name: '合并', exact: true }).click();
   await execute.click();
   await page.getByText(/合并最多支持 50 个 PDF/).waitFor();
+  await page.reload();
+  await uploadAndProbe(pdf('extract.pdf'));
+  await page.getByRole('button', { name: '提取页面', exact: true }).click();
+  const range = page.getByRole('textbox', { name: '页码范围' });
+  await range.fill(String(firstPages + 1));
+  await execute.click();
+  await page.getByText(/页码范围无效/).first().waitFor();
+  await range.fill('1');
+  const extractDone = page.waitForEvent('download', { timeout: 40_000 });
+  await execute.click();
+  const extracted = await extractDone;
+  assert.equal(extracted.suggestedFilename(), 'extracted.pdf');
+  const extractedBytes = await readFile(await extracted.path());
+  await page.reload();
+  assert.equal(await uploadAndProbe(pdf('extracted.pdf', extractedBytes)), 1);
+
+  if (firstPages >= 2) {
+    await page.reload();
+    await uploadAndProbe(pdf('split.pdf'));
+    await page.getByRole('button', { name: '拆分', exact: true }).click();
+    await range.fill('1,2');
+    const filenames = [];
+    page.on('download', (item) => filenames.push(item.suggestedFilename()));
+    await execute.click();
+    await page.getByText('已导出 2 / 2 个文件').waitFor();
+    await page.waitForFunction(() => document.readyState === 'complete');
+    await expectDownloads();
+    async function expectDownloads() {
+      const deadline = Date.now() + 5000;
+      while (filenames.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.deepEqual(filenames.sort(), ['part-1.pdf', 'part-2.pdf']);
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ pass: true, firstPages, secondPages, mergedPages, fileCountLimit: 50 }));
 } finally {

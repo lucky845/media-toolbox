@@ -72,6 +72,7 @@ export type FromWorker =
       type: 'done';
       taskId: string;
       output: ArrayBuffer;
+      outputs?: Array<{ name: string; output: ArrayBuffer }>;
       meta: ImageResultMeta;
     }
   | { v: typeof PROTOCOL_VERSION; type: 'cancelled'; taskId: string }
