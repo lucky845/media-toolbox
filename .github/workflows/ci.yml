@@ -122,8 +122,10 @@ jobs:
         run: |
           # 根包 private:true 会被报成 UNLICENSED 并被 --onlyAllow 拒绝，
           # 它不是我们分发的组件，排除即可（本地已验证退出码 0）。
+          # duck@0.1.12（mammoth 的传递依赖）package.json 写 "BSD"，
+          # license-checker 归一化为 "BSD*"（BSD 风格宽松许可），显式允许。
           npx --yes license-checker-rseidelsohn --production --excludePrivatePackages \
-            --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;Unlicense;MPL-2.0;BlueOak-1.0.0"
+            --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;BSD*;Apache-2.0;0BSD;CC0-1.0;Unlicense;MPL-2.0;BlueOak-1.0.0"
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses
