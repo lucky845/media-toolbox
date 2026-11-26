@@ -19,6 +19,9 @@ interface CapsState {
   load: () => Promise<void>;
 }
 
+let loading: Promise<void> | undefined;
+let refreshQueued = false;
+
 export const useCapabilities = create<CapsState>((set, get) => ({
   status: 'idle',
   caps: null,
@@ -27,28 +30,27 @@ export const useCapabilities = create<CapsState>((set, get) => ({
   error: null,
   restrictedMode: false,
 
-  load: async () => {
-    if (get().status === 'loading' || get().status === 'ready') return;
-    set({ status: 'loading', error: null });
-    try {
-      const backend = await getBackend();
-      const [caps, limits] = await Promise.all([backend.capabilities(), backend.limits()]);
-      set({
-        status: 'ready',
-        caps,
-        limits,
-        summary: summarizeCapabilities(caps),
-        restrictedMode: false,
-      });
-    } catch (e) {
-      set({
-        status: 'failed',
-        error: e as ToolError,
-        restrictedMode: true,
-        caps: null,
-        limits: null,
-        summary: null,
-      });
+  load: () => {
+    if (loading) {
+      refreshQueued = true;
+      return loading;
     }
+    loading = Promise.resolve().then(async () => {
+      do {
+        refreshQueued = false;
+        if (get().status !== 'ready') set({ status: 'loading', error: null });
+        try {
+          const backend = await getBackend();
+          const [caps, limits] = await Promise.all([backend.capabilities(), backend.limits()]);
+          set({ status: 'ready', caps, limits, summary: summarizeCapabilities(caps), restrictedMode: false });
+        } catch (e) {
+          // 刷新失败时保留上一次已知能力；只有首次探测失败才进入受限模式。
+          if (get().status !== 'ready') {
+            set({ status: 'failed', error: e as ToolError, restrictedMode: true, caps: null, limits: null, summary: null });
+          }
+        }
+      } while (refreshQueued);
+    }).finally(() => { loading = undefined; });
+    return loading;
   },
 }));

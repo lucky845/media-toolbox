@@ -130,6 +130,41 @@ fn select_encoder(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WebmAudioEncoder {
+    LibOpus,
+    LibVorbis,
+    NativeOpus,
+}
+
+impl WebmAudioEncoder {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LibOpus => "libopus",
+            Self::LibVorbis => "libvorbis",
+            Self::NativeOpus => "opus",
+        }
+    }
+}
+
+/// Select a codec the packaged FFmpeg actually advertises, preferring standard WebM audio.
+fn select_webm_audio(side: &sidecar::SidecarProbe) -> Result<WebmAudioEncoder, ToolError> {
+    if side.encoders.iter().any(|e| e == "libopus") {
+        return Ok(WebmAudioEncoder::LibOpus);
+    }
+    if side.encoders.iter().any(|e| e == "libvorbis") {
+        return Ok(WebmAudioEncoder::LibVorbis);
+    }
+    // FFmpeg's native Opus encoder is experimental in n7.1, but WebM-compatible.
+    if side.encoders.iter().any(|e| e == "opus") {
+        return Ok(WebmAudioEncoder::NativeOpus);
+    }
+    Err(ToolError::new(
+        ErrorCode::CodecUnsupported,
+        &[("codec", "Opus/Vorbis")],
+    ))
+}
+
 /// FFmpeg 转码：进度走 task://progress，取消走 TaskCancel + 进程树 kill。
 #[tauri::command]
 pub async fn video_transcode(
@@ -164,6 +199,12 @@ pub async fn video_transcode(
         let h = ((probe.height as f64 * scale) / 2.0).round() as u32 * 2;
         (Some(w.max(2)), Some(h.max(2)))
     };
+    let keep_audio = args.keep_audio && probe.has_audio;
+    let audio_encoder = if keep_audio && container == "webm" {
+        Some(select_webm_audio(&side)?.as_str().to_string())
+    } else {
+        None
+    };
     let params = TranscodeParams {
         rate_mode: RateMode::Bitrate,
         crf: 23,
@@ -171,7 +212,8 @@ pub async fn video_transcode(
         width,
         height,
         fps: args.fps,
-        audio_bitrate_kbps: if args.keep_audio { Some(128) } else { None },
+        audio_bitrate_kbps: keep_audio.then_some(128),
+        audio_encoder,
         hardware_encoder: hardware,
         container: container.into(),
     };
@@ -283,6 +325,102 @@ mod tests {
             select_encoder(&side, "webm").unwrap().as_deref(),
             Some("libvpx-vp9")
         );
+    }
+
+    #[test]
+    fn select_webm_audio_uses_available_encoder_in_preference_order() {
+        let mut side = sidecar::SidecarProbe::default();
+        assert_eq!(
+            select_webm_audio(&side).unwrap_err().code,
+            ErrorCode::CodecUnsupported
+        );
+        side.encoders.push("opus".into());
+        assert_eq!(
+            select_webm_audio(&side).unwrap(),
+            WebmAudioEncoder::NativeOpus
+        );
+        side.encoders.push("libvorbis".into());
+        assert_eq!(
+            select_webm_audio(&side).unwrap(),
+            WebmAudioEncoder::LibVorbis
+        );
+        side.encoders.push("libopus".into());
+        assert_eq!(select_webm_audio(&side).unwrap(), WebmAudioEncoder::LibOpus);
+    }
+
+    #[test]
+    fn webm_transcode_preserves_audio_with_available_sidecar_encoders() {
+        use std::process::Command;
+
+        let (Some(ffmpeg), Some(ffprobe)) = (
+            sidecar::binary_path("ffmpeg"),
+            sidecar::binary_path("ffprobe"),
+        ) else {
+            eprintln!("Skipping: FFmpeg and ffprobe are required");
+            return;
+        };
+        let side = sidecar::probe();
+        let Ok(video_encoder) = select_encoder(&side, "webm") else {
+            eprintln!("Skipping: FFmpeg has no VP9 encoder");
+            return;
+        };
+        if select_webm_audio(&side).is_err() {
+            eprintln!("Skipping: FFmpeg has no WebM audio encoder");
+            return;
+        }
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/sample.mp4");
+        let dst = std::env::temp_dir().join(format!("mt-webm-audio-{}.webm", std::process::id()));
+
+        // Exercise every compatible encoder this exact FFmpeg build advertises.
+        // This covers BtbN libopus/libvorbis builds and macOS native Opus fallback.
+        for (encoder, expected) in [
+            (WebmAudioEncoder::LibOpus, "opus"),
+            (WebmAudioEncoder::LibVorbis, "vorbis"),
+            (WebmAudioEncoder::NativeOpus, "opus"),
+        ] {
+            if !side.encoders.iter().any(|e| e == encoder.as_str()) {
+                continue;
+            }
+            let params = TranscodeParams {
+                rate_mode: RateMode::Bitrate,
+                hardware_encoder: video_encoder.clone(),
+                audio_encoder: Some(encoder.as_str().into()),
+                container: "webm".into(),
+                ..TranscodeParams::default_h264()
+            };
+            let argv =
+                build_transcode_args(&params, &fixture.to_string_lossy(), &dst.to_string_lossy())
+                    .unwrap();
+            let render = Command::new(&ffmpeg).args(argv).output().unwrap();
+            let probe = Command::new(&ffprobe)
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                ])
+                .arg(&dst)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_file(&dst);
+
+            assert!(
+                render.status.success(),
+                "{encoder:?}: {}",
+                String::from_utf8_lossy(&render.stderr)
+            );
+            assert!(
+                probe.status.success(),
+                "{}",
+                String::from_utf8_lossy(&probe.stderr)
+            );
+            assert_eq!(String::from_utf8_lossy(&probe.stdout).trim(), expected);
+        }
     }
 
     /// 用本机 ffprobe（PATH 兜底）真实探测 fixture；无 ffprobe 自动跳过。

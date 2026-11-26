@@ -43,7 +43,7 @@ jobs:
       - name: build wasm
         run: |
           npm i -D binaryen@^123
-          node scripts/build-wasm.mjs --all
+          node scripts/build-wasm.mjs --all --opt --require-opt
           node scripts/copy-wasm.mjs
 
       - name: build frontend

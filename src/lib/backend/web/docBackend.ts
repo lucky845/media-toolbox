@@ -8,7 +8,7 @@
 // Word↔PDF 结构化转换：由前端 mammoth/pdf-lib/docx 完成（Phase 4 后续接入），
 // 这里先返回核心提示与结构化文本，UI 常驻保真度声明。
 
-import { PROTOCOL_VERSION, type FromWorker, type ToWorker } from '../../../workers/protocol';
+import { PROTOCOL_VERSION, type DocWorkerPayload, type FromWorker, type ToWorker } from '../../../workers/protocol';
 import type {
   Backend,
   Capabilities,
@@ -38,16 +38,51 @@ interface Pending {
   settled: boolean;
 }
 
+// Keep the Web PDF merge limits aligned with media_ports::Limits::WEB.
 const DOC_LIMITS: Limits = {
   maxPixels: -1,
-  maxBytes: -1,
-  maxBatch: -1,
+  maxBytes: 20 * 1024 * 1024,
+  maxBatch: 50,
   maxDurationSec: -1,
   maxPages: 100,
   maxMemoryBytes: 0,
   maxConcurrent: 1,
   isRestricted: true,
 };
+
+function checkPdfBytes(bytes: number): void {
+  if (bytes > DOC_LIMITS.maxBytes) {
+    throw {
+      code: 'INPUT_TOO_LARGE',
+      message: 'PDF 输入总大小超过在线版上限（20 MiB）',
+      retryable: false,
+      desktopHint: true,
+    } satisfies ToolError;
+  }
+}
+
+function preflightPdfMerge(refs: InputRef[]): File[] {
+  if (refs.length < 2 || refs.length > DOC_LIMITS.maxBatch) {
+    throw {
+      code: 'INVALID_PARAMS',
+      message: refs.length < 2
+        ? '合并至少需要 2 个 PDF'
+        : `合并最多支持 ${DOC_LIMITS.maxBatch} 个 PDF（当前 ${refs.length} 个）`,
+      retryable: false,
+      desktopHint: refs.length >= 2,
+    } satisfies ToolError;
+  }
+
+  let total = 0;
+  return refs.map(({ file, name }) => {
+    if (!file) {
+      throw { code: 'IO', message: `无法读取文件内容：${name}`, retryable: false, desktopHint: false } satisfies ToolError;
+    }
+    total += file.size;
+    checkPdfBytes(total);
+    return file;
+  });
+}
 
 export class DocBackend implements Backend {
   readonly kind = 'web' as const;
@@ -169,11 +204,11 @@ export class DocBackend implements Backend {
 
   /** 探测 PDF 元信息（只读，不修改文件） */
   async probe(ref: InputRef): Promise<unknown> {
+    if (ref.file) checkPdfBytes(ref.file.size);
     await this.init();
     const w = this.worker;
     if (!w) throw new Error('worker 不可用');
-    const bytes = ref.file ? new Uint8Array(await ref.file.arrayBuffer()) : new Uint8Array(0);
-    const buf = bytes.buffer.slice(0) as ArrayBuffer;
+    const buf = ref.file ? await ref.file.arrayBuffer() : new ArrayBuffer(0);
     const taskId = `probe-${Math.random().toString(36).slice(2, 10)}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -192,13 +227,25 @@ export class DocBackend implements Backend {
   }
 
   async run(task: TaskPayload, opts: RunOptions): Promise<TaskResult> {
+    let files: File[];
+    let payload: DocWorkerPayload;
+    if (task.kind === 'pdf.merge') {
+      files = preflightPdfMerge(task.inputs);
+      payload = { kind: 'pdf.merge' };
+    } else {
+      const { input, ...operation } = task;
+      if (!input.file) {
+        throw { code: 'IO', message: '无法读取文件内容', retryable: false, desktopHint: false } satisfies ToolError;
+      }
+      checkPdfBytes(input.file.size);
+      files = [input.file];
+      payload = operation;
+    }
+
     await this.init();
+    const buffers = await Promise.all(files.map((file) => file.arrayBuffer()));
     const w = this.worker;
     if (!w) throw { code: 'WASM_LOAD_FAILED', message: 'Worker 不可用', retryable: true, desktopHint: false } satisfies ToolError;
-
-    const ref = 'input' in task ? task.input : null;
-    const bytes = ref?.file ? new Uint8Array(await ref.file.arrayBuffer()) : new Uint8Array(0);
-    const buf = bytes.buffer.slice(0) as ArrayBuffer;
 
     return new Promise<TaskResult>((resolve, reject) => {
       const p: Pending = {
@@ -218,11 +265,10 @@ export class DocBackend implements Backend {
         v: PROTOCOL_VERSION,
         type: 'runDoc',
         taskId: opts.taskId,
-        input: buf,
-        inputName: ref?.name ?? 'input.pdf',
-        payload: task,
+        inputs: buffers,
+        payload,
       };
-      w.postMessage(msg, [buf]);
+      w.postMessage(msg, buffers);
     });
   }
 

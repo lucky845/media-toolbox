@@ -14,16 +14,26 @@ pub fn pdf_probe(input: &[u8]) -> Result<String, JsValue> {
 
 #[cfg(feature = "doc")]
 #[wasm_bindgen]
-pub fn pdf_merge(inputs: Vec<JsValue>) -> Result<Vec<u8>, JsValue> {
-    let chunks: Vec<Vec<u8>> = inputs
-        .iter()
-        .map(|v| v.clone().dyn_into::<js_sys::Uint8Array>())
-        .map(|r| {
-            r.map(|a| a.to_vec())
-                .map_err(|_| JsValue::from_str("输入必须是 Uint8Array"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    media_core::pdf::pdf_merge(&chunks).map_err(err_to_js)
+pub fn pdf_merge(inputs: js_sys::Array) -> Result<Vec<u8>, JsValue> {
+    let limits = media_ports::Limits::WEB;
+    let count = inputs.length();
+    media_core::pdf::ops::check_merge_count(count as usize, &limits).map_err(err_to_js)?;
+
+    // Keep typed-array views until all lengths are checked; to_vec copies into WASM memory.
+    let mut arrays = Vec::with_capacity(count as usize);
+    let mut total_bytes = 0u64;
+    for i in 0..count {
+        let array = inputs
+            .get(i)
+            .dyn_into::<js_sys::Uint8Array>()
+            .map_err(|_| err_to_js(media_ports::ToolError::invalid("输入必须是 Uint8Array")))?;
+        total_bytes += u64::from(array.byte_length());
+        media_core::common::limits_check::check_bytes(total_bytes, &limits).map_err(err_to_js)?;
+        arrays.push(array);
+    }
+
+    let chunks: Vec<Vec<u8>> = arrays.iter().map(js_sys::Uint8Array::to_vec).collect();
+    media_core::pdf::pdf_merge(&chunks, &limits).map_err(err_to_js)
 }
 
 #[cfg(feature = "doc")]

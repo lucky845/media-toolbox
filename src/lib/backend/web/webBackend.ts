@@ -50,12 +50,17 @@ interface PendingTask {
   settled: boolean;
 }
 
+const cancelled: ToolError = {
+  code: 'CANCELLED', message: '已取消', retryable: false, desktopHint: false,
+};
+
 export class WebBackend implements Backend_ {
   readonly kind = 'web' as const;
 
   private worker: Worker | null = null;
   private ready = false;
   private initPromise: Promise<void> | null = null;
+  private rejectInit: ((error: ToolError) => void) | null = null;
   private limitsCache: Limits | null = null;
   private capsCache: Capabilities | null = null;
   private loadPath = '';
@@ -63,8 +68,18 @@ export class WebBackend implements Backend_ {
   private initLogs: LogEntry[] = [];
   /** taskId → 待决任务 */
   private pending = new Map<string, PendingTask>();
-  /** 探测请求的待决回调 */
-  private probes = new Map<string, (m: ImageMeta) => void>();
+  /**
+   * 探测请求的待决项。
+   *
+   * 这里必须同时持有 resolve/reject/timer 三样东西：
+   *  - 只存 resolve 时，worker 返回的 `error` 无处可去，只能等超时定时器触发，
+   *    用户看到的是误导性的「探测超时」，而不是真实原因（如超像素上限）；
+   *  - 成功时必须 clearTimeout，否则会留下野定时器（旧实现只在失败路径删过）。
+   */
+  private probes = new Map<
+    string,
+    { resolve: (m: ImageMeta) => void; reject: (e: unknown) => void; timer: number }
+  >();
 
   // ---- 初始化 ----
 
@@ -85,16 +100,7 @@ export class WebBackend implements Backend_ {
         retryable: true,
         desktopHint: false,
       };
-      for (const [, p] of this.pending) {
-        if (!p.settled) {
-          p.settled = true;
-          p.reject(err);
-        }
-      }
-      this.pending.clear();
-      this.worker = null;
-      this.ready = false;
-      this.initPromise = null;
+      if (this.worker === w) this.stopWorker(err);
     };
 
     const { glue, wasm } = wasmUrls();
@@ -112,11 +118,10 @@ export class WebBackend implements Backend_ {
     if (this.ready) return Promise.resolve();
     if (this.initPromise) return this.initPromise;
 
+    const w = this.ensureWorker();
     this.initPromise = new Promise<void>((resolve, reject) => {
-      const w = this.ensureWorker();
-      const orig = w.onmessage;
       const timeout = setTimeout(() => {
-        reject({
+        this.stopWorker({
           code: 'WASM_LOAD_FAILED',
           message: '核心模块加载超时（30 秒）',
           retryable: true,
@@ -124,20 +129,25 @@ export class WebBackend implements Backend_ {
         });
       }, 30_000);
 
+      this.rejectInit = (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      };
       w.onmessage = (ev: MessageEvent<FromWorker>) => {
+        if (this.worker !== w) return;
         const m = ev.data;
         if (m.type === 'ready') {
           clearTimeout(timeout);
           this.ready = true;
           this.limitsCache = m.limits;
           this.loadPath = m.loadPath;
-          w.onmessage = orig;
+          this.rejectInit = null;
           resolve();
           return;
         }
         if (m.type === 'error' && m.taskId === 'init') {
           clearTimeout(timeout);
-          w.onmessage = orig;
+          this.rejectInit = null;
           this.initPromise = null;
           this.worker = null;
           w.terminate();
@@ -152,6 +162,29 @@ export class WebBackend implements Backend_ {
     return this.initPromise;
   }
 
+  private stopWorker(error: ToolError): void {
+    const worker = this.worker;
+    this.worker = null;
+    this.ready = false;
+    this.initPromise = null;
+    this.limitsCache = null;
+    worker?.terminate();
+    this.rejectInit?.(error);
+    this.rejectInit = null;
+    for (const pending of this.pending.values()) {
+      if (!pending.settled) {
+        pending.settled = true;
+        pending.reject(error);
+      }
+    }
+    this.pending.clear();
+    for (const [id, probe] of this.probes) {
+      clearTimeout(probe.timer);
+      this.probes.delete(id);
+      probe.reject(error);
+    }
+  }
+
   private onMessage(m: FromWorker): void {
     switch (m.type) {
       case 'ready':
@@ -160,10 +193,11 @@ export class WebBackend implements Backend_ {
         this.loadPath = m.loadPath;
         return;
       case 'probed': {
-        const cb = this.probes.get(m.taskId);
-        if (cb) {
+        const entry = this.probes.get(m.taskId);
+        if (entry) {
           this.probes.delete(m.taskId);
-          cb(m.meta);
+          clearTimeout(entry.timer);
+          entry.resolve(m.meta);
         }
         return;
       }
@@ -203,6 +237,15 @@ export class WebBackend implements Backend_ {
         return;
       }
       case 'error': {
+        // 探测请求走的是 probes 而不是 pending，必须在这里一并处理，
+        // 否则 worker 报的真实错误会被丢弃，只剩一个 15 秒后的「探测超时」。
+        const probe = this.probes.get(m.taskId);
+        if (probe) {
+          this.probes.delete(m.taskId);
+          clearTimeout(probe.timer);
+          probe.reject(m.error);
+          return;
+        }
         const p = this.pending.get(m.taskId);
         if (!p || p.settled) return;
         p.settled = true;
@@ -232,18 +275,28 @@ export class WebBackend implements Backend_ {
 
   async capabilities(): Promise<Capabilities> {
     await this.init();
-    if (this.capsCache) return this.capsCache;
 
-    // wasm 侧的静态能力（编译进包的 codec 集合）从 worker 拿；浏览器能力在这里探测。
-    const merged = await this.mergeBrowserCaps();
-    this.capsCache = merged;
-    return merged;
+    const caps = this.capsCache ??= await this.mergeBrowserCaps();
+    const installed = await this.isServiceWorkerActivated();
+    return { ...caps, offline: { ...caps.offline, installed } };
+  }
+
+  /** 单独探测 SW 是否已激活（与 mergeBrowserCaps 内同一判据） */
+  private async isServiceWorkerActivated(): Promise<boolean> {
+    if (!('serviceWorker' in navigator)) return false;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      return reg?.active?.state === 'activated';
+    } catch {
+      return false;
+    }
   }
 
   async limits(): Promise<Limits> {
     await this.init();
     if (!this.limitsCache) throw new Error('limits 未初始化');
-    return this.limitsCache;
+    // 图片处理和取消共用同一个 Worker，只能调度一个运行任务。
+    return { ...this.limitsCache, maxConcurrent: 1 };
   }
 
   private async mergeBrowserCaps(): Promise<Capabilities> {
@@ -263,18 +316,7 @@ export class WebBackend implements Backend_ {
     const codecs = await videoCodecSupport();
     const savePicker = typeof (globalThis as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
     const dirPicker = typeof (globalThis as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
-    // 注意：getRegistration() 在无注册时返回 undefined。
-    // 早期版本写成 `!== undefined`（恒真）导致 UI 错误地宣称「可离线」—— 已在 e2e 中发现并修复。
     const sw = 'serviceWorker' in navigator;
-    let swReady = false;
-    if (sw) {
-      try {
-        const reg = await navigator.serviceWorker.getRegistration();
-        swReady = reg?.active?.state === 'activated';
-      } catch {
-        swReady = false;
-      }
-    }
     const coi = (self as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
     const ua = navigator.userAgent;
     const major = (/(?:Chrome|Firefox|Version)\/(\d+)/.exec(ua)?.[1] ?? '0');
@@ -305,7 +347,7 @@ export class WebBackend implements Backend_ {
       office: { wordToPdf: 'structured', pdfToWord: 'structured' },
       cancel: { hard: false },
       fileSystem: { directoryPicker: dirPicker, savePicker },
-      offline: { serviceWorker: sw, installed: swReady },
+      offline: { serviceWorker: sw, installed: false },
       env: { userAgentMajor: major, crossOriginIsolated: coi },
     };
   }
@@ -346,11 +388,10 @@ export class WebBackend implements Backend_ {
     const w = this.worker;
     if (!w) throw { code: 'WASM_LOAD_FAILED', message: 'Worker 不可用', retryable: true, desktopHint: false } satisfies ToolError;
 
-    const bytes = task.input.file
-      ? new Uint8Array(await task.input.file.arrayBuffer())
-      : new Uint8Array();
+    const buf = await task.input.file?.arrayBuffer();
+    if (opts.signal.aborted || this.worker !== w) throw cancelled;
 
-    if (bytes.length === 0) {
+    if (!buf?.byteLength) {
       throw {
         code: 'IO',
         message: '无法读取文件内容',
@@ -359,9 +400,7 @@ export class WebBackend implements Backend_ {
       } satisfies ToolError;
     }
 
-    // 转移 buffer 给 worker（零拷贝）
-    const buf = bytes.buffer.slice(0) as ArrayBuffer;
-
+    const onAbort = () => this.cancel(opts.taskId);
     return new Promise<TaskResult>((resolve, reject) => {
       const p: PendingTask = {
         resolve,
@@ -373,10 +412,6 @@ export class WebBackend implements Backend_ {
       };
       this.pending.set(opts.taskId, p);
 
-      // 取消：Web 端是硬取消（terminate），因为 wasm 同步执行无法软中断
-      const onAbort = () => {
-        this.cancel(opts.taskId);
-      };
       opts.signal.addEventListener('abort', onAbort, { once: true });
 
       const msg: ToWorker = {
@@ -388,24 +423,18 @@ export class WebBackend implements Backend_ {
         params: task.params,
         encode: task.encode,
       };
-      w.postMessage(msg, [buf]);
-    });
+      try {
+        w.postMessage(msg, [buf]);
+      } catch (error) {
+        this.pending.delete(opts.taskId);
+        reject(error);
+      }
+    }).finally(() => opts.signal.removeEventListener('abort', onAbort));
   }
 
   cancel(taskId: string): void {
-    const p = this.pending.get(taskId);
-    if (p && !p.settled) {
-      p.settled = true;
-      this.pending.delete(taskId);
-      p.reject({ code: 'CANCELLED', message: '已取消', retryable: false, desktopHint: false });
-    }
-    // 硬取消：terminate 后重建 worker（下一个任务会重新 init）
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-      this.ready = false;
-      this.initPromise = null;
-    }
+    // 硬取消会终止共享 worker，同时拒绝受其生命周期影响的任务与探测。
+    if (this.pending.has(taskId)) this.stopWorker(cancelled);
   }
 
   /** 探测单张图（不入队） */
@@ -413,23 +442,26 @@ export class WebBackend implements Backend_ {
     await this.init();
     const w = this.worker;
     if (!w) throw new Error('worker 不可用');
-    const bytes = ref.file ? new Uint8Array(await ref.file.arrayBuffer()) : new Uint8Array();
-    const buf = bytes.buffer.slice(0) as ArrayBuffer;
+    const buf = (await ref.file?.arrayBuffer()) ?? new ArrayBuffer(0);
+    if (this.worker !== w) throw cancelled;
     const taskId = `probe-${Math.random().toString(36).slice(2, 10)}`;
 
     return new Promise<ImageMeta>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         this.probes.delete(taskId);
         reject(new Error('探测超时'));
       }, 15_000);
-      this.probes.set(taskId, (m) => {
+      this.probes.set(taskId, { resolve, reject, timer });
+      try {
+        w.postMessage(
+          { v: PROTOCOL_VERSION, type: 'probe', taskId, input: buf, inputName: ref.name } satisfies ToWorker,
+          [buf],
+        );
+      } catch (error) {
         clearTimeout(timer);
-        resolve(m);
-      });
-      w.postMessage(
-        { v: PROTOCOL_VERSION, type: 'probe', taskId, input: buf, inputName: ref.name } as ToWorker,
-        [buf],
-      );
+        this.probes.delete(taskId);
+        reject(error);
+      }
     });
   }
 
@@ -564,15 +596,7 @@ export class WebBackend implements Backend_ {
   }
 
   dispose(): void {
-    if (this.worker) {
-      this.worker.postMessage({ v: PROTOCOL_VERSION, type: 'dispose' } as ToWorker);
-      this.worker.terminate();
-      this.worker = null;
-    }
-    this.ready = false;
-    this.initPromise = null;
-    this.pending.clear();
-    this.probes.clear();
+    this.stopWorker({ code: 'CANCELLED', message: '后端已释放', retryable: false, desktopHint: false });
   }
 }
 

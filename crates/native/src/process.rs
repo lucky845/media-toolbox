@@ -4,7 +4,8 @@
 //! - argv 由 `media_core::video::args` 的纯函数构造（本层不拼命令行字符串，杜绝注入）；
 //! - 进度逐行喂给 `ProgressParser`（同一份换算逻辑，Web ffmpeg.wasm 降级也复用）；
 //! - 取消 = 置 TaskCancel 标志 + kill 进程树（硬取消，对应 capabilities().cancel.hard）；
-//! - 错误映射为中文 ToolError：二进制缺失 → BinaryMissing，退出码异常 → DecodeFailed。
+//! - 错误映射为中文 ToolError：二进制缺失 → BinaryMissing，退出码异常 → DecodeFailed；
+//! - stderr 直接接到 null sink，避免管道堵塞和无用读线程。
 //!
 //! 非 UTF-8 文件名：`std::process::Command` 接受 `OsStr`，全程不做 UTF-8 转换；
 //! detail 里不写路径（规格：错误详情不得含文件内容或路径）。
@@ -80,7 +81,9 @@ pub fn run_with_progress(
     on_progress: &dyn Fn(Progress),
 ) -> Result<ProcessOutcome, ToolError> {
     let mut cmd = Command::new(binary);
-    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // stderr is not returned or otherwise consumed, so connect it to the platform null sink
+    // rather than creating a pipe that can fill and block ffmpeg.
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::null());
     configure_spawn(&mut cmd);
 
     let mut child = cmd.spawn().map_err(|e| {
@@ -197,6 +200,57 @@ pub fn run_capture(binary: &Path, args: &[String]) -> Result<String, ToolError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 回归测试：stderr 写满管道缓冲区时**不能死锁**。
+    ///
+    /// 历史 bug：只读 stdout、不读 stderr。macOS 管道约 64 KB，
+    /// 一个局部损坏的 60 秒视频会让 ffmpeg 吐 345 KB 到 stderr，
+    /// 子进程在 write 上阻塞，而我们阻塞在 read stdout —— 永久挂起。
+    ///
+    /// 重启当前测试二进制来产生大量 stderr，不依赖系统 shell 或 ffmpeg。
+    #[test]
+    fn stderr_flood_does_not_deadlock() {
+        let binary = std::env::current_exe().unwrap();
+        let args = [
+            "--ignored",
+            "--exact",
+            "process::tests::stderr_flood_child",
+            "--nocapture",
+        ]
+        .map(str::to_owned);
+        let cancel = TaskCancel::new();
+
+        // 放到独立线程里跑：万一回归，用超时让测试失败而不是挂死整个测试进程。
+        let (tx, rx) = std::sync::mpsc::channel();
+        let child_cancel = cancel.clone();
+        std::thread::spawn(move || {
+            let r = run_with_progress(&binary, &args, 0.0, &child_cancel, &|_p| {});
+            let _ = tx.send(r);
+        });
+
+        let result = rx
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap_or_else(|err| {
+                cancel.cancel();
+                panic!("stderr 写满后 run_with_progress 未返回: {err}");
+            })
+            .unwrap();
+        assert!(result.success);
+        assert!(result.stdout_tail.contains("stderr flood finished"));
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture for stderr_flood_does_not_deadlock"]
+    fn stderr_flood_child() {
+        use std::io::Write;
+
+        let chunk = [b'x'; 8 * 1024];
+        let mut stderr = std::io::stderr().lock();
+        for _ in 0..128 {
+            stderr.write_all(&chunk).unwrap();
+        }
+        println!("stderr flood finished");
+    }
 
     #[test]
     fn spawn_missing_binary_maps_to_binary_missing() {

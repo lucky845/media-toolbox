@@ -52,7 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for p in &op.inputs {
                 docs.push(std::fs::read(p)?);
             }
-            pdf_merge(&docs)?
+            // 一致性程序比对的是 native 与 wasm 的输出；wasm 侧按 Limits::WEB 校验，
+            // 因此这里也传 WEB，保证两端在同一约束下比较。
+            pdf_merge(&docs, &media_ports::Limits::WEB)?
         }
         other => return Err(format!("未知操作: {other}").into()),
     };

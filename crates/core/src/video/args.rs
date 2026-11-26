@@ -23,6 +23,8 @@ pub struct TranscodeParams {
     pub fps: Option<u8>,
     /// 音频码率（kbps），None = 不处理音频
     pub audio_bitrate_kbps: Option<u32>,
+    /// 显式音频编码器；None 保持默认 AAC（桌面 WebM 按 sidecar 探测能力设置）
+    pub audio_encoder: Option<String>,
     /// 硬件编码器名（如 'h264_videotoolbox'），None = 软件编码
     pub hardware_encoder: Option<String>,
     /// 输出容器扩展名
@@ -63,6 +65,7 @@ impl TranscodeParams {
             height: None,
             fps: None,
             audio_bitrate_kbps: Some(128),
+            audio_encoder: None,
             hardware_encoder: None,
             container: "mp4".into(),
         }
@@ -103,8 +106,9 @@ pub fn build_transcode_args(p: &TranscodeParams, input: &str, output: &str) -> R
     // 编码器：硬件优先，否则 H.264 软件编码（桌面 LGPL 构建下用系统硬件编码）
     match &p.hardware_encoder {
         Some(hw) if !hw.is_empty() => {
-            // 白名单校验：只允许常见硬件编码器名，防止任意字符串注入
+            // 白名单校验：只允许识别过的软件/硬件编码器名，防止任意字符串注入。
             const ALLOWED_HW: &[&str] = &[
+                "libx264",
                 "h264_videotoolbox",
                 "hevc_videotoolbox",
                 "h264_nvenc",
@@ -142,8 +146,18 @@ pub fn build_transcode_args(p: &TranscodeParams, input: &str, output: &str) -> R
     }
 
     if let Some(ab) = p.audio_bitrate_kbps {
+        let audio_encoder = p.audio_encoder.as_deref().unwrap_or("aac");
+        const ALLOWED_AUDIO: &[&str] = &["aac", "libopus", "libvorbis", "opus"];
+        if !ALLOWED_AUDIO.contains(&audio_encoder) {
+            return Err(ToolError::invalid(format!(
+                "不允许的音频编码器: {audio_encoder}"
+            )));
+        }
         a.push("-c:a".into());
-        a.push("aac".into());
+        a.push(audio_encoder.into());
+        if audio_encoder == "opus" {
+            a.extend(["-strict:a".into(), "experimental".into()]);
+        }
         a.push("-b:a".into());
         a.push(format!("{ab}k"));
     } else {
@@ -363,6 +377,34 @@ mod tests {
             build_transcode_args(&p, "i", "o").unwrap_err().code,
             ErrorCode::InvalidParams
         );
+    }
+
+    #[test]
+    fn transcode_args_use_container_compatible_audio() {
+        let mut p = TranscodeParams::default_h264();
+        let args = build_transcode_args(&p, "in.mp4", "out.mp4").unwrap();
+        assert!(args.windows(2).any(|v| v == ["-c:a", "aac"]));
+
+        p.container = "webm".into();
+        p.audio_encoder = Some("libopus".into());
+        p.hardware_encoder = Some("libvpx-vp9".into());
+        let args = build_transcode_args(&p, "in.mp4", "out.webm").unwrap();
+        assert!(args.windows(2).any(|v| v == ["-c:a", "libopus"]));
+        assert!(args.windows(2).any(|v| v == ["-b:a", "128k"]));
+        assert!(!args.contains(&"-strict:a".into()));
+
+        p.audio_encoder = Some("opus".into());
+        let args = build_transcode_args(&p, "in.mp4", "out.webm").unwrap();
+        assert!(args.windows(2).any(|v| v == ["-c:a", "opus"]));
+        assert!(args.windows(2).any(|v| v == ["-strict:a", "experimental"]));
+    }
+
+    #[test]
+    fn transcode_args_accept_detected_libx264() {
+        let mut p = TranscodeParams::default_h264();
+        p.hardware_encoder = Some("libx264".into());
+        let args = build_transcode_args(&p, "in.mp4", "out.mp4").unwrap();
+        assert!(args.windows(2).any(|v| v == ["-c:v", "libx264"]));
     }
 
     #[test]

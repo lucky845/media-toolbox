@@ -1,34 +1,67 @@
-// PDF 结构操作的端到端测试：在真实浏览器里上传 PDF → 探测 → 旋转 → 下载。
+// Exercise PDF structure operations in a real browser and probe the downloaded merge.
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const base = process.argv[2] ?? 'http://localhost:4173';
-const fixture = process.argv[3] ?? 'tests/fixtures/sample.pdf';
+const fixture = await readFile(process.argv[3] ?? 'tests/fixtures/sample.pdf');
+const secondFixture = process.argv[4] ? await readFile(process.argv[4]) : fixture;
+const pdf = (name, buffer = fixture) => ({ name, mimeType: 'application/pdf', buffer });
 
 const browser = await chromium.launch();
-const page = await browser.newPage();
+try {
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
 
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(m.text());
-});
+  await page.goto(`${base}/#/pdf`, { waitUntil: 'networkidle' });
+  const picker = page.locator('input[type="file"]');
+  const pageCount = page.locator('dl.kv dd').first();
+  async function uploadAndProbe(files) {
+    await pageCount.waitFor({ state: 'hidden' });
+    await picker.setInputFiles(files);
+    await pageCount.waitFor({ state: 'visible', timeout: 30_000 });
+    return Number(await pageCount.innerText());
+  }
+  const [firstPages, secondPages] = await (async () => {
+    const firstPages = await uploadAndProbe(pdf('first.pdf'));
+    await page.reload();
+    const secondPages = await uploadAndProbe(pdf('second.pdf', secondFixture));
+    return [firstPages, secondPages];
+  })();
+  assert.ok(firstPages > 0 && secondPages > 0);
 
-await page.goto(`${base}/#/pdf`, { waitUntil: 'networkidle' });
-await page.waitForSelector('.dropzone', { timeout: 20_000 });
+  const execute = page.getByRole('button', { name: '执行', exact: true });
+  const rotateDownload = page.waitForEvent('download', { timeout: 40_000 });
+  await execute.click();
+  assert.equal((await rotateDownload).suggestedFilename(), 'rotated.pdf');
+  await page.getByText(/已生成 rotated\.pdf/).waitFor();
 
-// 上传 PDF
-await page.locator('input[type="file"]').setInputFiles(fixture);
-await page.waitForSelector('dl.kv', { timeout: 30_000 });
-const meta = (await page.locator('dl.kv').innerText()).replace(/\n+/g, ' | ');
+  await page.reload();
+  await uploadAndProbe([pdf('first.pdf'), pdf('second.pdf', secondFixture)]);
+  await page.getByRole('button', { name: '合并', exact: true }).click();
+  const downloadDone = page.waitForEvent('download', { timeout: 40_000 });
+  await execute.click();
+  const download = await downloadDone;
+  assert.equal(download.suggestedFilename(), 'merged.pdf');
+  const merged = await readFile(await download.path());
+  assert.equal(merged.subarray(0, 5).toString(), '%PDF-');
+  await page.getByText(/已生成 merged\.pdf/).waitFor();
 
-// 执行默认操作（旋转）
-const runBtn = page.getByRole('button', { name: '执行' });
-await runBtn.click();
+  await page.reload();
+  const mergedPages = await uploadAndProbe(pdf('merged.pdf', merged));
+  assert.equal(mergedPages, firstPages + secondPages);
 
-await page.waitForSelector('.notice.info', { timeout: 40_000 });
-const result = (await page.locator('.notice.info').innerText()).replace(/\n+/g, ' | ');
-
-const pass = errors.length === 0 && meta.includes('3') && result.includes('rotated.pdf');
-console.log(JSON.stringify({ pass, meta, result, errors }, null, 2));
-await browser.close();
-process.exit(pass ? 0 : 1);
+  await page.reload();
+  await uploadAndProbe(Array.from({ length: 51 }, (_, i) => pdf(`input-${i}.pdf`)));
+  await page.getByRole('button', { name: '合并', exact: true }).click();
+  await execute.click();
+  await page.getByText(/合并最多支持 50 个 PDF/).waitFor();
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ pass: true, firstPages, secondPages, mergedPages, fileCountLimit: 50 }));
+} finally {
+  await browser.close();
+}

@@ -13,6 +13,9 @@ import type {
 
 export const PROTOCOL_VERSION = 1 as const;
 
+type WithoutInputRefs<T> = T extends TaskPayload ? Omit<T, 'input' | 'inputs'> : never;
+export type DocWorkerPayload = WithoutInputRefs<TaskPayload>;
+
 /** 主线程 → worker */
 export type ToWorker =
   | {
@@ -44,9 +47,9 @@ export type ToWorker =
       v: typeof PROTOCOL_VERSION;
       type: 'runDoc';
       taskId: string;
-      input: ArrayBuffer;
-      inputName: string;
-      payload: TaskPayload;
+      /** Input bytes in task order, transferred rather than cloned. */
+      inputs: ArrayBuffer[];
+      payload: DocWorkerPayload;
     }
   | { v: typeof PROTOCOL_VERSION; type: 'cancel'; taskId: string }
   | { v: typeof PROTOCOL_VERSION; type: 'dispose' };

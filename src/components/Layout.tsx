@@ -16,6 +16,36 @@ export function Layout({ children }: { children: React.ReactNode }) {
     void load();
   }, [load]);
 
+  // Service Worker 激活是异步的，通常晚于首次 load()。
+  // 激活后重新取一次能力，让「离线」状态从不实变为准确。
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const sw = navigator.serviceWorker;
+    let stopped = false;
+    let watched: ServiceWorker | null = null;
+    const onStateChange = () => {
+      if (!stopped && watched?.state === 'activated') void load();
+    };
+    const observe = (worker: ServiceWorker | null) => {
+      watched?.removeEventListener('statechange', onStateChange);
+      watched = worker;
+      watched?.addEventListener('statechange', onStateChange);
+      onStateChange();
+    };
+    const onControllerChange = () => observe(sw.controller);
+    sw.addEventListener('controllerchange', onControllerChange);
+    onControllerChange();
+    // ready also covers active registrations that have not claimed this page.
+    void sw.ready.then((reg) => {
+      if (!stopped && !sw.controller) observe(reg.active);
+    });
+    return () => {
+      stopped = true;
+      sw.removeEventListener('controllerchange', onControllerChange);
+      watched?.removeEventListener('statechange', onStateChange);
+    };
+  }, [load]);
+
   const activeHash = typeof window !== 'undefined' ? window.location.hash : '';
 
   return (
