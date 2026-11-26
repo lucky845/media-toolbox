@@ -64,6 +64,10 @@ jobs:
           side = json.load(open('src-tauri/tauri.sidecar.conf.json'))
           for k, v in side.get('bundle', {}).items():
               base.setdefault('bundle', {}).setdefault(k, v)
+          # Windows 打包必须有 .ico（tauri icon 已生成到 src-tauri/icons/icon.ico）
+          icons = base['bundle'].setdefault('icon', [])
+          if 'icons/icon.ico' not in icons:
+              icons.append('icons/icon.ico')
           json.dump(base, open('src-tauri/tauri.release.conf.json', 'w'))
           print('merged -> src-tauri/tauri.release.conf.json')
           PY
