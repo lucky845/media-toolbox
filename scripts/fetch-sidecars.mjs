@@ -47,7 +47,7 @@ const SOURCES = {
   'aarch64-apple-darwin': {
     url: null,
     kind: 'build',
-    note: 'macOS 无官方 LGPL 构建，需在构建机本地编译（见本文件末尾的说明）',
+    note: 'macOS 无官方 LGPL 构建，CI 上源码编译（VideoToolbox/AudioToolbox，无 x264/x265）',
   },
 };
 
@@ -124,23 +124,57 @@ async function main() {
   log(`来源: ${src.note}`);
 
   if (!src.url) {
-    log('');
-    log('macOS 需要本地编译 FFmpeg（BtbN 不提供 macOS 构建）。在构建机上执行：');
-    log('');
-    log('  git clone --depth 1 --branch n7.1 https://git.ffmpeg.org/ffmpeg.git');
-    log('  cd ffmpeg');
-    log('  ./configure --prefix=/tmp/ff --disable-static --enable-shared \\');
-    log('              --disable-doc --disable-programs --enable-ffmpeg --enable-ffprobe \\');
-    log('              --enable-videotoolbox --enable-audiotoolbox \\');
-    log('              --enable-libvpx --enable-libsvtav1');
-    log('  make -j$(sysctl -n hw.ncpu) && make install');
-    log('');
-    log('  # 然后拷贝（注意 target triple 后缀是 Tauri externalBin 的硬要求）：');
-    log(`  cp /tmp/ff/bin/ffmpeg  src-tauri/sidecar/ffmpeg-${target}`);
-    log(`  cp /tmp/ff/bin/ffprobe src-tauri/sidecar/ffprobe-${target}`);
-    log('');
-    log('注意：--disable-gpl 是默认值，不要加 --enable-gpl / --enable-libx264 / --enable-libx265。');
-    log('VideoToolbox 是系统组件，不引入 GPL 依赖。');
+    // macOS 没有可下载的 LGPL 构建（BtbN 只提供 win/linux）。在 CI runner 上源码编译：
+    // 只开 LGPL 兼容编码器 + 系统 VideoToolbox/AudioToolbox，绝不引入 x264/x265/nonfree。
+    // 静态链接（--enable-static --disable-shared）以便只需分发两个二进制、不需要附带 dylib。
+    log('macOS：源码编译 LGPL FFmpeg（无 x264/x265；H.264 走系统 VideoToolbox）…');
+    const buildDir = join(repo, '.sidecar-tmp', 'ffmpeg-src');
+    await mkdir(buildDir, { recursive: true });
+    const clone = () => execFileSync('git', [
+      'clone', '--depth', '1', '--branch', 'n7.1',
+      'https://git.ffmpeg.org/ffmpeg.git', buildDir,
+    ], { stdio: 'inherit', cwd: repo });
+    if (!existsSync(join(buildDir, 'configure'))) {
+      try {
+        clone();
+      } catch (e) {
+        // git.ffmpeg.org 偶有不可达；用 GitHub 镜像作为同源回退
+        log(`git.ffmpeg.org 拉取失败（${e.message}），改用 GitHub 镜像…`);
+        execFileSync('git', [
+          'clone', '--depth', '1', '--branch', 'n7.1',
+          'https://github.com/FFmpeg/FFmpeg.git', buildDir,
+        ], { stdio: 'inherit', cwd: repo });
+      }
+    }
+    const prefix = join(buildDir, 'out');
+    const configure = [
+      `--prefix=${prefix}`,
+      '--enable-static', '--disable-shared', '--pkg-config-flags=--static',
+      '--disable-doc', '--disable-debug',
+      '--enable-ffmpeg', '--enable-ffprobe',
+      '--enable-videotoolbox', '--enable-audiotoolbox',
+      '--enable-libvpx', '--enable-libsvtav1',
+      // 安全：显式不启用任何 GPL/nonfree 组件（configure 默认即关闭，这里写明便于审计）
+      '--disable-gpl', '--disable-nonfree',
+    ];
+    execFileSync('./configure', configure, { stdio: 'inherit', cwd: buildDir });
+    const jobs = process.env.JOBS ?? '4';
+    execFileSync('make', [`-j${jobs}`], { stdio: 'inherit', cwd: buildDir });
+    execFileSync('make', ['install'], { stdio: 'inherit', cwd: buildDir });
+
+    for (const name of ['ffmpeg', 'ffprobe']) {
+      const from = join(prefix, 'bin', name);
+      const dest = join(sidecarDir, `${name}-${target}`);
+      execFileSync('cp', [from, dest], { stdio: 'inherit' });
+      await chmod(dest, 0o755);
+      const v = verifyLicense(dest);
+      log(`${v.ok ? '✓' : '✗'} ${name}-${target}: ${v.version ?? v.reason}`);
+      if (!v.ok) {
+        log(v.reason);
+        process.exit(1);
+      }
+    }
+    log('macOS sidecar 编译完成并通过许可证核验。');
     process.exit(0);
   }
 

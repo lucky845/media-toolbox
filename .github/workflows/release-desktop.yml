@@ -43,6 +43,10 @@ jobs:
             librsvg2-dev \
             patchelf
 
+      - name: macOS FFmpeg 编译依赖
+        if: matrix.os == 'macos-14'
+        run: brew install nasm pkg-config
+
       - run: npm ci
 
       - name: 拉取并校验 sidecar（FFmpeg/ffprobe，校验 sha256）
