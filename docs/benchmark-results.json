@@ -1,6 +1,6 @@
 {
   "environment": {
-    "date": "2026-11-26T04:52:07.451Z",
+    "date": "2026-11-26T04:57:29.680Z",
     "platform": "darwin",
     "arch": "arm64",
     "node": "v26.13.1",
@@ -11,13 +11,13 @@
   "cases": {
     "b1-lanczos-12mp": {
       "native": {
-        "medianMs": 219,
+        "medianMs": 220,
         "samples": [
-          219,
-          217,
-          229
+          222,
+          220,
+          219
         ],
-        "elapsedMs": 229,
+        "elapsedMs": 219,
         "hash": "c950a120438e8ad55ec57dc6922f5cc55213c4cb9fa0be46d78db2c82d896e9a",
         "height": 1200,
         "inputBytes": 1220032,
@@ -28,11 +28,11 @@
         "width": 1600
       },
       "wasm": {
-        "medianMs": 409,
+        "medianMs": 408,
         "samples": [
-          409,
-          411,
-          409
+          408,
+          413,
+          407
         ],
         "target": "wasm",
         "loadPath": "compileStreaming",
@@ -41,10 +41,10 @@
         "width": 1600,
         "height": 1200,
         "hash": "c950a120438e8ad55ec57dc6922f5cc55213c4cb9fa0be46d78db2c82d896e9a",
-        "elapsedMs": 409
+        "elapsedMs": 407
       },
       "byteIdentical": true,
-      "ratioWasmToNative": 1.87
+      "ratioWasmToNative": 1.85
     }
   }
 }

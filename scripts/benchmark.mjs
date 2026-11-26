@@ -66,8 +66,10 @@ try {
     '-frames:v', '1', bigPng,
   ]);
 } catch (e) {
-  log(`生成测试图失败：${e.message}`);
-  process.exit(2);
+  // 基准是「有工具才测」的诊断项，不该因为环境缺 ffmpeg 卡住 CI。
+  log(`跳过 B1：无法用 ffmpeg 生成测试图（${ffmpeg}）；本机跑请安装 ffmpeg 或设 FFMPEG 环境变量。`);
+  console.log(JSON.stringify({ skipped: true, reason: 'ffmpeg unavailable', case: 'b1-lanczos-12mp' }));
+  process.exit(0);
 }
 
 // B1 参数：4000×3000 → 1600×1200，lanczos3，PNG 输出

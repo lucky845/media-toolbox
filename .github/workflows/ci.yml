@@ -87,8 +87,10 @@ jobs:
       - name: copy wasm into public/（CI 构建期生成，不进仓库）
         run: node scripts/copy-wasm.mjs
 
-      - name: build PDF 一致性程序（native 侧）
-        run: cargo build --release -p media-native --example pdf_conformance
+      - name: build 图片/PDF 一致性程序（native 侧）
+        run: |
+          cargo build --release -p media-native --example conformance
+          cargo build --release -p media-native --example pdf_conformance
 
       - name: PDF 双端一致性（native vs wasm 逐字节相等）
         run: node scripts/run-pdf-conformance.mjs
