@@ -20,8 +20,7 @@
 | `mammoth`（docx 解析） | 约 520 KB | 约 160 KB | 约 130 KB **[推算]** | npm | 进入 Word 相关功能时 |
 | `pdf-lib` + `fontkit`（结构化生成 PDF） | 约 1.1 MB | 约 320 KB | 约 260 KB **[推算]** | npm | 同上 |
 | 中文字体子集 `NotoSansSC-subset.woff2`（GB2312 6763 字） | 8.3 MB 源 → **1.27 MB woff2 [实测]** | — | 1.27 MB | 构建期 `subset-fonts.mjs` | **仅**「结构化生成含中文的 PDF」时 |
-| WebCodecs 路径（`mp4-muxer` + `webm-muxer` + 胶水） | 约 210 KB | 约 68 KB | 约 58 KB **[推算]** | npm | 进入视频页时 |
-| `mp4box.js`（仅解析元数据/首帧） | 约 350 KB | 约 110 KB | 约 92 KB **[推算]** | npm | 同上 |
+| WebCodecs 转码链（`mp4box` + `mp4-muxer` + `webm-muxer` + `videoBackend` 胶水，实测并入 `index-*.js`） | — | **index chunk 90 KB gzip [实测]**（全站入口，含图片/PDF/视频胶水） | **见 dist 合计** | npm | 进入视频页时（代码随入口一起加载，编解码由浏览器原生执行不占包体） |
 | **可选**：`@ffmpeg/core`（单线程） | **31 MB [实测]** | **9.7 MB [实测]** | **6.9 MB [实测]** | `@ffmpeg/core 0.12.10` | **只有用户点「改用 ffmpeg.wasm」才下载** |
 | **可选**：`@ffmpeg/ffmpeg` 包装 + worker | 约 120 KB | 约 38 KB | 约 33 KB **[推算]** | npm | 同上 |
 
@@ -53,7 +52,8 @@
 进入「PDF」页
   + core-doc.wasm (1.4 MB) + pdf.js (424 KB)           ≈ 0.86 MB br
 进入「视频」页（WebCodecs 路线）
-  + mp4-muxer/webm-muxer/mp4box 胶水                    ≈ 0.15 MB br
+  + mp4box/mp4-muxer/webm-muxer 胶水                    ≈ 0.09 MB gzip [实测]
+  编解码由浏览器原生执行，不下载编解码器 wasm
   [若点「改用 ffmpeg.wasm」→ +9.7 MB gzip / 6.9 MB br]
 进入「文档」页
   + mammoth + pdf-lib                                   ≈ 0.39 MB br

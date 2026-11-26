@@ -28,6 +28,12 @@
 | TypeScript | 5.9 | 类型系统（仅构建期） | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | binaryen / wasm-opt | 123 | wasm 体积优化（仅构建期） | Apache-2.0 | https://github.com/WebAssembly/binaryen |
 | `pdfjs-dist` | 6.5.438 | PDF 按页渲染（PDF→图片） | Apache-2.0 | https://github.com/mozilla/pdf.js |
+| `mp4box` | 2.6.0 | MP4 解封装（视频转码读取样本） | BSD-3-Clause | https://github.com/gpac/mp4box.js |
+| `mp4-muxer` | 5.2.2 | MP4/H.264 封装 | MIT | https://github.com/Vanilagy/mp4-muxer |
+| `webm-muxer` | 5.1.4 | WebM/VP9 封装 | MIT | https://github.com/Vanilagy/webm-muxer |
+
+> `mp4-muxer` / `webm-muxer` 的上游已推荐继任者 `mediabunny`，但本项目按规格沿用上述宽松许可库；
+> 三库只是容器 mux/demux（无编解码器），**不引入 GPL**。视频编解码全部走浏览器原生 WebCodecs。
 
 pdf.js 的 10 个标准字体（Foxit*.pfb，来自 pdf.js 发行包）随构建脚本拷入
 `dist/pdfjs/standard_fonts/`，用于补齐 PDF 内未嵌入的标准字体。这些是 **pdf.js 自带的字体资产**，

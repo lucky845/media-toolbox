@@ -6,6 +6,7 @@
 //  - 所有 URL 都经 `import.meta.env.BASE_URL` 拼接（规格 §16）。
 
 import { warmWasm } from './wasmLoader';
+import { getVideoBackend, videoCodecSupport } from './videoBackend';
 import {
   PROTOCOL_VERSION,
   isTerminal,
@@ -256,6 +257,8 @@ export class WebBackend implements Backend_ {
 
     const videoEncoder = has('VideoEncoder');
     const videoDecoder = has('VideoDecoder');
+    // 真实编解码器由浏览器/OS 决定，用 isConfigSupported 逐个探测而非 UA 猜（docs/COMPATIBILITY.md）。
+    const codecs = await videoCodecSupport();
     const savePicker = typeof (globalThis as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
     const dirPicker = typeof (globalThis as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
     // 注意：getRegistration() 在无注册时返回 undefined。
@@ -286,12 +289,15 @@ export class WebBackend implements Backend_ {
       },
       video: {
         available: videoEncoder && videoDecoder,
-        engines: videoEncoder ? ['webcodecs', 'ffmpeg-wasm'] : ['ffmpeg-wasm'],
-        decoders: [],
-        encoders: [],
+        engines: videoEncoder && videoDecoder ? ['webcodecs', 'ffmpeg-wasm'] : ['ffmpeg-wasm'],
+        decoders: codecs.decoders,
+        encoders: codecs.encoders,
         hardwareEncoder: false,
         maxBytes: 200 * 1024 * 1024,
         maxDurationSec: 300,
+        inputContainers: ['mp4'],
+        outputContainers: ['mp4', 'webm'],
+        audioPassthrough: true,
       },
       pdf: { render: true, edit: true, maxPages: 100 },
       office: { wordToPdf: 'structured', pdfToWord: 'structured' },
@@ -303,6 +309,11 @@ export class WebBackend implements Backend_ {
   }
 
   async run(task: TaskPayload, opts: RunOptions): Promise<TaskResult> {
+    // 视频转码走浏览器原生 WebCodecs（主线程 + 浏览器内部编解码线程），不经过 wasm worker。
+    if (task.kind === 'video.transcode') {
+      return getVideoBackend().run(task.input, task.params, opts);
+    }
+
     if (task.kind !== 'image.process') {
       throw {
         code: 'UNSUPPORTED_FORMAT',

@@ -2,8 +2,8 @@
 
 > 目标：Web 轻量视频 + 轻量文档 + 「能力与限制」页完善。
 > 本次交付：PDF 结构操作（wasm）、Word↔PDF 结构化转换骨架、**常驻保真度声明**、
-> 视频能力探测与 GPL 降级说明。WebCodecs 转码管线标注为 Phase 4b（未接入）；
-> pdf.js 按页渲染在 Phase 4b 已接入（见 §7）。
+> 视频能力探测与 GPL 降级说明。pdf.js 按页渲染（§7）与 WebCodecs 轻量转码（§8）
+> 均在 Phase 4b 接入；ffmpeg.wasm 实际降级按钮仍未接（默认不加载，见 §6）。
 
 ---
 
@@ -74,8 +74,8 @@ e2e: smoke / pdf / mime / offline 4 项全通过
 
 ## 6. 明确未做（Phase 4b 及以后）
 
-- **WebCodecs 转码管线**：4b 接入（当前只探测能力、不执行）
-- 可选 ffmpeg.wasm 实际降级按钮（GPL 声明与包已规划，未接执行）
+- 可选 ffmpeg.wasm 实际降级按钮（GPL 声明与包已规划，**默认不加载、未接执行**）
+- WebCodecs 转码已接入（见 §8），但仅 MP4/H.264 输入输出 MP4/WebM，非全格式
 - 完整 mammoth→pdf-lib 的 docx→pdf 文件生成（当前产出结构化 JSON 中间产物）
 - 桌面端 LibreOffice 调用（Phase 5）
 
@@ -130,4 +130,44 @@ e2e: smoke / pdf / mime / offline 4 项全通过
 - 单次最多 100 页；DPI 200 以上、更高页数、批量导出 → 桌面版。
 - 单页像素上限 20 MP、长图总像素上限 40 MP，超限自动降采样。
 - 不承诺高保真：表单域、批注、页眉页脚、复杂表格、嵌入字体的还原度有限。
-- WebCodecs 转码、ffmpeg.wasm 降级、桌面 LibreOffice 仍属 Phase 4b/5 后续。
+- WebCodecs 转码见 §8；ffmpeg.wasm 降级按钮、桌面 LibreOffice 仍属后续阶段。
+
+---
+
+## 8. Phase 4b：WebCodecs 轻量视频转码（已接入）
+
+### 8.1 架构与数据流
+
+`MP4 → mp4box.js 解封装 → VideoDecoder → (缩放/降帧) → VideoEncoder → muxer → 下载`
+
+- 解码/编码由浏览器内部线程执行，主线程只做帧搬运与参数控制；容器 mux/demux 由宽松许可库完成，
+  **不引入任何 GPL 编解码器**，也不加载 ffmpeg.wasm。
+- `src/lib/backend/web/videoBackend.ts`：解封装仅接受 MP4/H.264（`mp4box.js` 只解 ISOBMFF）；
+  AVC 的 `avcC` 描述从 mp4box 私有 box 结构切出后喂给 `VideoDecoder.configure`。
+- 编码器用 `VideoEncoder.isConfigSupported` 逐个探测（avc1.42E01E/4D401F/640028 或 vp09/vp8），
+  全不支持抛 `CODEC_UNSUPPORTED` + desktopHint；不按 UA 猜。
+- 音频只在「MP4 输出 + 源 `mp4a.40.2` + keepAudio」时以 AAC 原始码流透传（mp4-muxer 自动从
+  采样率/声道生成 AudioSpecificConfig），其余情况输出无音轨并在 UI 常驻提示；不做 AudioEncoder 重编码。
+- 取消：`AbortSignal` → `decoder.close()` + `encoder.close()` + `mp4.stop()`；120 秒超时同样处理；
+  每 16 个压缩样本 / 每 2 帧 `setTimeout(0)` 让出主线程，保持 UI 响应。
+- 端到端只经 `Backend.run()`（`webBackend.run` 把 `video.transcode` 转发给视频后端），
+  features 层不 import Web 实现细节；`capabilities()` 用真实探测结果填 decoders/encoders。
+
+### 8.2 交付物
+
+| 文件 | 作用 |
+|---|---|
+| `src/lib/backend/web/videoBackend.ts` | 解封装→解码→编码→封装全链路，阈值/取消/超时/中文错误/进度 |
+| `src/features/video/videoForm.ts` / `VideoPage.tsx` | 参数表单（容器/码率/缩放/帧率/音轨）+ 真实转码 UI + 常驻限制声明 |
+| `src/lib/backend/types.ts` | 新增 `VideoTranscodeParams` / `VideoProbeResult`；删除 `params: unknown` |
+| `src/lib/backend/web/webBackend.ts` | `capabilities()` 真实编解码器探测；`run()` 转发 `video.transcode` |
+| `src/features/help/CapabilitiesPage.tsx` | 视频行改为「✅ 轻量 MP4→MP4/WebM」+ 明确限制 |
+| `src/sw.ts` | `CACHE_VERSION` → `v1-phase4-webcodecs` |
+| `THIRD_PARTY_NOTICES.md` | mp4box(BSD-3) / mp4-muxer(MIT) / webm-muxer(MIT) |
+| `tests/fixtures/sample.mp4` / `tests/e2e/video.mjs` | ffmpeg 生成 1 秒小样本；真实 Chromium 转码 e2e |
+
+### 8.3 仍受限制（常驻声明）
+
+- 输入容器仅 MP4/H.264；MKV/MOV/HEVC 引导桌面版。≤200 MB、≤5 分钟。
+- 输出 MP4(H.264)/WebM(VP9)，无硬件编码；WebM 无音轨；音频透传失败时明确提示。
+- ffmpeg.wasm 降级包（GPL-2.0-or-later）仍默认不加载、不预取，点击前显示许可证说明。

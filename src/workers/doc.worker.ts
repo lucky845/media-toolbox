@@ -192,7 +192,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
           }
           case 'video.transcode': {
             // Web 侧视频走 WebCodecs（主线程），这里只返回构造好的 argv（供可选 ffmpeg.wasm 降级）
-            const params = payload.params as Record<string, unknown>;
+            const params = payload.params as unknown as Record<string, unknown>;
             const args = glue.video_build_args(
               JSON.stringify({ rateMode: 'crf', crf: 23, bitrateKbps: 2500, container: 'mp4', audioBitrateKbps: 128, ...params }),
               'input',

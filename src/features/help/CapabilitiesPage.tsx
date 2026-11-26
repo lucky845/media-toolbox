@@ -78,12 +78,12 @@ export function CapabilitiesPage() {
             </tr>
             <tr>
               <td>视频压缩 / 转码</td>
-              <td>⚠️ 能力探测已接入，WebCodecs 管线 Phase 4b</td>
+              <td>✅ 轻量：MP4(H.264)→MP4/WebM</td>
               <td>✅ 全格式 + 硬件编码</td>
               <td>
-                当前在线版会如实探测浏览器编解码能力，但尚未执行转码（不假装能转）。
-                浏览器的编码器由 Chrome/Safari 决定，容器只出 MP4/WebM；不保证 MKV/MOV/HEVC。
-                需要转码请用桌面版（FFmpeg sidecar）。
+                WebCodecs 原生编解码，mp4box.js 解封装，≤200 MB / ≤5 分钟。
+                输入仅 MP4/H.264、输出 MP4(H.264)/WebM(VP9)，无硬件编码、不保证 MKV/MOV/HEVC；
+                音轨仅 MP4 + 源 AAC 可无损透传，否则无音轨。全格式请下载桌面版（FFmpeg sidecar）。
               </td>
             </tr>
             <tr>

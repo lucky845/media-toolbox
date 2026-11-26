@@ -100,7 +100,8 @@ export interface ImageMeta {
 }
 
 export interface ImageResultMeta {
-  outFormat: ImageFormat;
+  /** 图片格式为 ImageFormat；视频/PDF 任务使用容器名（mp4/webm/pdf） */
+  outFormat: ImageFormat | 'mp4' | 'webm' | 'pdf';
   outWidth: number;
   outHeight: number;
   inputBytes: number;
@@ -137,6 +138,12 @@ export interface VideoCaps {
   hardwareEncoder: boolean;
   maxBytes: number;
   maxDurationSec: number;
+  /** 解封装只支持 ISOBMFF（MP4）；其余容器引导桌面版 */
+  inputContainers?: string[];
+  /** 在线版可输出的容器 */
+  outputContainers?: string[];
+  /** AAC 源可直接透传进 MP4，不需要 AudioEncoder */
+  audioPassthrough?: boolean;
 }
 
 export interface PdfCaps {
@@ -229,15 +236,45 @@ export interface PdfRenderParams {
   longImage: boolean;
 }
 
+/** Web 轻量视频转码参数。
+ *
+ * 容器决定编码器：mp4 → H.264（AVC），webm → VP9；无硬件编码。
+ * 音频仅在「MP4 输出 + 源为 AAC + keepAudio」时以原始码流透传，其他情况无音轨。
+ */
+export interface VideoTranscodeParams {
+  container: 'mp4' | 'webm';
+  /** 输出码率，单位 Mbps；0.4–12 */
+  bitrateMbps: number;
+  /** 尺寸缩放百分比，10–100；保持宽高比 */
+  scalePercent: number;
+  /** 输出帧率，0 表示沿用源帧率；1–60 */
+  fps: number;
+  /** 是否尝试保留音轨（见上方约束） */
+  keepAudio: boolean;
+}
+
+/** 视频探测结果（只解封装，不解码） */
+export interface VideoProbeResult {
+  codec: string;
+  width: number;
+  height: number;
+  durationSec: number;
+  frameRate: number;
+  hasAudio: boolean;
+  audioCodec?: string;
+  /** 源音轨能否在 MP4 输出中无损透传 */
+  audioPassthrough: boolean;
+}
+
 export type TaskPayload =
   | { kind: 'image.process'; input: InputRef; params: ImageParams; encode: EncodeOptions }
+  | { kind: 'video.transcode'; input: InputRef; params: VideoTranscodeParams }
   | { kind: 'pdf.render'; input: InputRef; params: PdfRenderParams }
   | { kind: 'pdf.merge'; inputs: InputRef[] }
   | { kind: 'pdf.split'; input: InputRef; ranges: PageRange[] }
   | { kind: 'pdf.rotate'; input: InputRef; pages: PageSelectorDto; degrees: number }
   | { kind: 'pdf.extract'; input: InputRef; pages: PageSelectorDto; what: 'text' | 'images' | 'pages' }
-  | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' }
-  | { kind: 'video.transcode'; input: InputRef; params: unknown };
+  | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' };
 
 export interface TaskResult {
   bytes: Uint8Array;
