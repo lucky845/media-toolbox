@@ -20,6 +20,7 @@ import type {
   ImageMeta,
   ImageResultMeta,
   InputRef,
+  PdfMeta,
   Limits,
   LogEntry,
   Progress,
@@ -352,6 +353,15 @@ export class WebBackend implements Backend_ {
     };
   }
 
+  probePdf(ref: InputRef): Promise<PdfMeta> {
+    return getDocBackend().probePdf(ref);
+  }
+
+  async readPdf(ref: InputRef): Promise<ArrayBuffer> {
+    if (!ref.file) throw { code: 'INVALID_PARAMS', message: 'Web PDF 预览需要浏览器文件', retryable: false, desktopHint: false } satisfies ToolError;
+    return ref.file.arrayBuffer();
+  }
+
   async run(task: TaskPayload, opts: RunOptions): Promise<TaskResult> {
     // 视频转码走浏览器原生 WebCodecs（主线程 + 浏览器内部编解码线程），不经过 wasm worker。
     if (task.kind === 'video.transcode') {
@@ -545,13 +555,13 @@ export class WebBackend implements Backend_ {
     });
   }
 
-  async saveOutput(bytes: Uint8Array, name: string): Promise<'downloaded' | 'saved' | 'cancelled'> {
+  async saveOutput(bytes: Uint8Array, name: string, options?: { directDownload?: boolean }): Promise<'downloaded' | 'saved' | 'cancelled'> {
     // 优先用 File System Access API（可让用户选目录），降级到 <a download>
     const picker = (globalThis as {
       showSaveFilePicker?: (o: unknown) => Promise<FileSystemFileHandle>;
     }).showSaveFilePicker;
 
-    if (picker) {
+    if (picker && !options?.directDownload) {
       try {
         const handle = await picker({
           suggestedName: name,

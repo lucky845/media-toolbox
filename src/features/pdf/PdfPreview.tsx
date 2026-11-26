@@ -3,7 +3,7 @@
 // 这里只负责「何时请求哪一页」以及把 ImageBitmap 画到 <canvas> 上。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getDocBackend } from '../../lib/backend/web/docBackend';
+import { getBackend } from '../../lib/backend';
 import { getPdfRenderBackend } from '../../lib/backend/web/pdfRenderBackend';
 import { useCapabilities } from '../../store/capabilities';
 import type { PageRange, ToolError } from '../../lib/backend/types';
@@ -168,13 +168,13 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
         ac.signal,
         maxPages,
       );
-      if (out.outputs?.length) {
-        for (const item of out.outputs) await getDocBackend().saveOutput(item.bytes, item.name);
-        setNotice(`已导出 ${out.outputs.length} 张图片`);
-      } else {
-        await getDocBackend().saveOutput(out.bytes, out.outputName);
-        setNotice(`已导出 ${out.outputName}`);
+      const backend = await getBackend();
+      const outputs = out.outputs?.length ? out.outputs : [{ bytes: out.bytes, name: out.outputName }];
+      let saved = 0;
+      for (const item of outputs) {
+        if (await backend.saveOutput(item.bytes, item.name, { directDownload: true }) !== 'cancelled') saved++;
       }
+      if (saved) setNotice(`已导出 ${saved} / ${outputs.length} 张图片`);
     } catch (e) {
       onErrorRef.current(e as ToolError);
     } finally {

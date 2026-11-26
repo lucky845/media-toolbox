@@ -14,6 +14,7 @@ import type {
   Capabilities,
   InputRef,
   Limits,
+  PdfMeta,
   RunOptions,
   TaskPayload,
   TaskResult,
@@ -164,6 +165,7 @@ export class DocBackend implements Backend {
           bytes: new Uint8Array(m.output),
           meta: m.meta,
           outputName: p.outputName,
+          outputs: m.outputs?.map(({ name, output }) => ({ name, bytes: new Uint8Array(output) })),
         });
         return;
       }
@@ -203,7 +205,7 @@ export class DocBackend implements Backend {
   }
 
   /** 探测 PDF 元信息（只读，不修改文件） */
-  async probe(ref: InputRef): Promise<unknown> {
+  async probePdf(ref: InputRef): Promise<PdfMeta> {
     if (ref.file) checkPdfBytes(ref.file.size);
     await this.init();
     const w = this.worker;
@@ -215,7 +217,7 @@ export class DocBackend implements Backend {
         this.probes.delete(taskId);
         reject({ code: 'TIMEOUT', message: 'PDF 探测超时', retryable: true, desktopHint: false });
       }, 30_000);
-      this.probes.set(taskId, (meta) => { clearTimeout(timer); resolve(meta); });
+      this.probes.set(taskId, (meta) => { clearTimeout(timer); resolve(meta as PdfMeta); });
       w.postMessage({
         v: PROTOCOL_VERSION,
         type: 'probe',
@@ -224,6 +226,10 @@ export class DocBackend implements Backend {
         inputName: ref.name,
       } as ToWorker, [buf]);
     });
+  }
+
+  async probe(ref: InputRef): Promise<unknown> {
+    return this.probePdf(ref);
   }
 
   async run(task: TaskPayload, opts: RunOptions): Promise<TaskResult> {

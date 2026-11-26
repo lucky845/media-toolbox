@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "media-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "image",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "media-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "media-core",
  "media-ports",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "media-ports"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "media-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "js-sys",
  "media-core",

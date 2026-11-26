@@ -72,6 +72,7 @@ pub struct CancelCaps {
 pub struct FileSystemCaps {
     pub directory_picker: bool,
     pub save_picker: bool,
+    pub native_file_picker: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,6 +141,7 @@ pub fn probe_capabilities() -> Result<Capabilities, ToolError> {
         file_system: FileSystemCaps {
             directory_picker: true,
             save_picker: true,
+            native_file_picker: true,
         },
         offline: OfflineCaps {
             service_worker: false,

@@ -219,15 +219,16 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
           message: `outputName=${outputName}`,
         });
 
-        const copy = new Uint8Array(bytes.length);
-        copy.set(bytes);
-        const out = copy.buffer.slice(0) as ArrayBuffer;
+        const artifacts = outputs?.map(({ name, bytes }) => ({ name, output: Uint8Array.from(bytes).buffer }));
+        const out = artifacts?.[0]?.output ?? Uint8Array.from(bytes).buffer;
+        const transfer = artifacts?.length ? artifacts.map(({ output }) => output) : [out];
         send(
           {
             v: PROTOCOL_VERSION,
             type: 'done',
             taskId,
             output: out,
+            outputs: artifacts,
             meta: {
               outFormat: 'pdf' as never,
               outWidth: 0,
@@ -239,7 +240,7 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
               savingsText: '',
             },
           },
-          [out],
+          transfer,
         );
       } catch (e) {
         send({

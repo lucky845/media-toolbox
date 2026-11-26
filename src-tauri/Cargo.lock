@@ -2200,7 +2200,7 @@ dependencies = [
 
 [[package]]
 name = "media-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "image",
@@ -2213,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "media-native"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "media-core",
  "media-ports",
@@ -2224,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "media-ports"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -2232,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "media-toolbox-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "media-core",
  "media-native",
