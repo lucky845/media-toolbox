@@ -34,15 +34,17 @@ const log = (...a) => console.error(...a);
  */
 const SOURCES = {
   'x86_64-pc-windows-msvc': {
-    // BtbN 的 lgpl-shared 构建：动态链接，体积小，且符合 LGPL 的「可替换库」要求
-    url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-lgpl-shared-7.1.zip',
+    // BtbN 的 lgpl-shared 构建：动态链接，体积小，且符合 LGPL 的「可替换库」要求。
+    // 不用写死版本号/URL —— 用 GitHub API 在 latest 发布里按模式匹配当前资产名，
+    // 否则 BtbN 升级 FFmpeg 版本后固定 URL 会 404（2026-11 实测 7.1 已失效）。
+    apiMatch: 'win64-lgpl-shared',
     kind: 'zip',
-    note: 'BtbN lgpl-shared（无 --enable-gpl / --enable-nonfree）',
+    note: 'BtbN lgpl-shared（无 --enable-gpl / --enable-nonfree；版本动态解析）',
   },
   'x86_64-unknown-linux-gnu': {
-    url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-lgpl-shared-7.1.tar.xz',
+    apiMatch: 'linux64-lgpl-shared',
     kind: 'tar.xz',
-    note: 'BtbN lgpl-shared',
+    note: 'BtbN lgpl-shared（版本动态解析）',
   },
   'aarch64-apple-darwin': {
     url: null,
@@ -123,7 +125,7 @@ async function main() {
   log(`目标: ${target}`);
   log(`来源: ${src.note}`);
 
-  if (!src.url) {
+  if (src.kind === 'build') {
     // macOS 没有可下载的 LGPL 构建（BtbN 只提供 win/linux）。在 CI runner 上源码编译：
     // 只开 LGPL 兼容编码器 + 系统 VideoToolbox/AudioToolbox，绝不引入 x264/x265/nonfree。
     // 静态链接（--enable-static --disable-shared）以便只需分发两个二进制、不需要附带 dylib。
@@ -184,8 +186,18 @@ async function main() {
   await mkdir(tmp, { recursive: true });
   const archive = join(tmp, 'ffmpeg-download');
 
-  log(`下载 ${src.url}`);
-  execSync(`curl -fL --retry 3 -o "${archive}" "${src.url}"`, { stdio: 'inherit' });
+  // 动态解析当前 latest 发布里的资产名，避免 FFmpeg 版本升级后固定 URL 404。
+  const rel = JSON.parse(execFileSync('curl', [
+    '-fsSL', 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest',
+  ], { encoding: 'utf8' }));
+  const asset = rel.assets.find((a) => a.name.includes(src.apiMatch));
+  if (!asset) {
+    log(`✗ 在 BtbN latest 发布里找不到匹配 ${src.apiMatch} 的资产（发布 ${rel.tag_name}）`);
+    process.exit(1);
+  }
+  const url = asset.browser_download_url;
+  log(`下载 ${url}（发布 ${rel.tag_name}）`);
+  execSync(`curl -fL --retry 3 -o "${archive}" "${url}"`, { stdio: 'inherit' });
 
   const hash = await sha256(archive);
   log(`sha256: ${hash}`);
