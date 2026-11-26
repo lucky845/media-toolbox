@@ -98,3 +98,33 @@ Tauri 二进制                        cargo build 成功，启动无崩溃
 - 三平台 Release 实测出包：需 tag 触发 CI，本轮只保证 workflow 配置正确、二进制可构建。
 - 批量队列接入桌面并行（rayon 已在 image command 使用，视频批量尚未）。
 - 本机无 LibreOffice，原生转换的真实验证只能在装有 LO 的机器/CI 上做；本轮验证了错误路径。
+
+---
+
+## 9. 三平台 Release 实测出包（v0.1.0，最终验证）
+
+tag `v0.1.0` 触发 `release-desktop` workflow（run `45771792298`），三平台 matrix **全部 success**。
+本轮在 CI 上逐一定位并修复了以下真实集成问题（都写在提交历史里）：
+
+1. macOS sidecar 原先只打印编译说明不产出二进制 → 改为 CI 上源码编译 LGPL FFmpeg；
+2. BtbN 固定 URL 404 → 改用 GitHub API 动态解析 latest 资产名；
+3. Windows externalBin 缺 `.exe` 后缀 → 按 Tauri 硬规则补上；
+4. Windows MSI 的 WiX code page 936 无法编码中文 productName → release 配置里改 ASCII 名；
+5. Windows 缺 `.ico` → 用 `npx tauri icon` 从 PNG 生成并写入 release 配置；
+6. Linux 的 lgpl-shared 缺 `libavdevice.so` → 改用静态 lgpl 构建；
+7. macos-14 runner 未被分配 → 改 `macos-latest`；
+8. FFmpeg n7.1 的 libsvtav1 wrapper 与新 Homebrew SVT-AV1 API 不兼容 → 去掉该编码器
+   （H.264 走系统 VideoToolbox，档位 L 足够）。
+
+**Release 产物**（https://github.com/lucky845/media-toolbox/releases/tag/v0.1.0）：
+
+| 平台 | 文件 | 大小 |
+|---|---|---|
+| Windows x64 | `Media.Toolbox_0.1.0_x64_zh-CN.msi` | 114.8 MB |
+| macOS arm64 | `_0.1.0_aarch64.dmg` | 23.4 MB |
+| macOS arm64 | `_aarch64.app.tar.gz` | 23.4 MB |
+| Linux x64 | `_0.1.0_amd64.deb` | 125.9 MB |
+| Linux x64 | `_0.1.0_amd64.AppImage` | 192.1 MB |
+
+macOS 未签名（零成本约束），releaseBody 已写明首次打开方法。桌面版完全离线，FFmpeg 为
+档位 L（LGPL 无 libx264/x265），LibreOffice MPL-2.0，清单见 `THIRD_PARTY_NOTICES.md`。

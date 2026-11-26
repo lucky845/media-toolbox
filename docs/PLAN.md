@@ -176,7 +176,7 @@ Phase 4b（待做）：WebCodecs 转码管线、pdf.js 按页渲染+虚拟化、
 - [x] 本机验证：212 Rust 测试 / 4 Tauri command 测试 / 6 e2e / Tauri 二进制构建+启动
 - [x] LibreOffice headless Word↔PDF command（office_convert + 能力驱动前端切换 + docx 结构化修复）
 - [x] PDF 高 DPI 阈值放宽（复用 pdf.js；PdfCaps.maxDpi + render maxPages 参数化）
-- [ ] 三平台 Release 实测出包（tag 触发 CI，本机无完整 Xcode 不出 dmg）
+- [x] 三平台 Release 实测出包（v0.1.0 / run 45771792298 全绿）：Windows MSI + macOS arm64 dmg + Linux deb/AppImage
 - [ ] 视频批量队列接入桌面并行
 
 ## Phase 6 — 一致性、基准、许可证、README 🔶 收尾中
