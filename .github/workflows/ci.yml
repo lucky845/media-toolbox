@@ -87,6 +87,15 @@ jobs:
       - name: copy wasm into public/（CI 构建期生成，不进仓库）
         run: node scripts/copy-wasm.mjs
 
+      - name: build PDF 一致性程序（native 侧）
+        run: cargo build --release -p media-native --example pdf_conformance
+
+      - name: PDF 双端一致性（native vs wasm 逐字节相等）
+        run: node scripts/run-pdf-conformance.mjs
+
+      - name: B1 基准（12 MP lanczos，native vs wasm，结果入 docs/benchmark-results.json）
+        run: node scripts/benchmark.mjs
+
       - run: npm run build  # tsc + vite + SW 编译
 
       - name: 外部域名扫描

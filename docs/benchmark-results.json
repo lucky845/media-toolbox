@@ -1,0 +1,50 @@
+{
+  "environment": {
+    "date": "2026-11-26T04:52:07.451Z",
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v26.13.1",
+    "input": "12 MP (4000x3000 testsrc2)",
+    "iterations": 3,
+    "note": "median of 3; native=4 threads; wasm=single thread in Node V8 (same engine as browser)"
+  },
+  "cases": {
+    "b1-lanczos-12mp": {
+      "native": {
+        "medianMs": 219,
+        "samples": [
+          219,
+          217,
+          229
+        ],
+        "elapsedMs": 229,
+        "hash": "c950a120438e8ad55ec57dc6922f5cc55213c4cb9fa0be46d78db2c82d896e9a",
+        "height": 1200,
+        "inputBytes": 1220032,
+        "outputBytes": 40018,
+        "peakEstimate": 30540096,
+        "target": "native",
+        "threads": 4,
+        "width": 1600
+      },
+      "wasm": {
+        "medianMs": 409,
+        "samples": [
+          409,
+          411,
+          409
+        ],
+        "target": "wasm",
+        "loadPath": "compileStreaming",
+        "inputBytes": 1220032,
+        "outputBytes": 40018,
+        "width": 1600,
+        "height": 1200,
+        "hash": "c950a120438e8ad55ec57dc6922f5cc55213c4cb9fa0be46d78db2c82d896e9a",
+        "elapsedMs": 409
+      },
+      "byteIdentical": true,
+      "ratioWasmToNative": 1.87
+    }
+  }
+}

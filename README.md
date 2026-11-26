@@ -74,11 +74,11 @@ cargo tauri build --target aarch64-apple-darwin
 |---|---|---|---|
 | 图片 压缩/裁剪/旋转/翻转/亮度对比度饱和度/缩放/EXIF 方向 | ✅ ≤20 MP、≤20 MB | ✅ 大图、批量、rayon 并行 | 全部已实现（Phase 3）；单线程 wasm + Worker |
 | 图片 格式转换 | ✅ jpeg/png/webp/gif/bmp/tiff | ✅ 加 AVIF | AVIF 编码库（ravif）约 +1.5–2 MB，Web 默认关闭 |
-| 视频 压缩/格式转换 | ⚠️ 仅轻量，≤200 MB、≤5 分钟 | ✅ 全格式、硬件编码 | 无 COOP/COEP → 单线程；编解码器由浏览器决定 |
-| 视频 元数据/首帧 | ✅ 轻量解析 | ✅ ffprobe | — |
-| PDF → 图片 | ✅ ≤100 页 | ✅ 全页数、高 DPI | pdf.js 按页渲染 + 虚拟化 |
+| 视频 压缩/格式转换 | ⚠️ 仅轻量 MP4(H.264)→MP4/WebM，≤200 MB、≤5 分钟 | ✅ FFmpeg sidecar（档位 L：无 libx264，H.264 走系统硬件编码） | 无 COOP/COEP → 单线程；编解码器由浏览器决定 |
+| 视频 元数据/首帧 | ✅ mp4box 轻量解析 | ✅ ffprobe | — |
+| PDF → 图片 | ✅ ≤100 页、≤200 DPI | ✅ 不限页数、≤400 DPI（复用 pdf.js） | pdf.js 按页渲染 + 虚拟化；阈值由 capabilities 注入 |
 | PDF 合并/拆分/旋转/提取 | ✅ | ✅ | Rust `lopdf`，两端同一份 |
-| PDF → Word / Word → PDF | ⚠️ 仅结构化 | ✅ LibreOffice 优先 + 结构化兜底 | 浏览器内没有 LibreOffice |
+| PDF → Word / Word → PDF | ⚠️ 仅结构化（mammoth 读 docx，输出 JSON 段落） | ✅ LibreOffice headless 优先 + 结构化兜底 | 浏览器内没有 LibreOffice，不承诺高保真 |
 | 批量队列 | ✅ 1–2 Worker + 总进度/取消/重试 | ✅ rayon + 子进程池 | 队列级暂停；running 只能取消 |
 | 离线 | ✅ 首次加载后由 SW 缓存（已实现） | ✅ 完全离线 | 外壳 + wasm 分包预缓存；绝不缓存可选 ffmpeg 包 |
 | 大文件 | ❌ 超限中止 + 桌面版引导 | ✅ 流式 | wasm 32 位内存上限 + 峰值内存模型 |
@@ -155,12 +155,15 @@ npm run preview
 cd src-tauri && cargo tauri dev
 cargo tauri build
 
-# 测试
-cargo test --workspace                 # Rust：175 个测试
-npx vitest run                         # 前端：12 个测试
-node scripts/run-conformance.mjs       # 双端一致性：21 个用例
+# 测试（下列数字是本仓库当前实测值）
+cargo test --workspace                 # Rust：212 个测试（含 native 真实 ffmpeg 集成测试）
+(cd src-tauri && cargo test --lib)      # Tauri command：6 个测试
+npx vitest run                         # 前端：16 个测试
+node scripts/run-conformance.mjs       # 图片双端一致性：21 个用例，逐字节相等
+node scripts/run-pdf-conformance.mjs   # PDF 双端一致性：3 个用例（需先 build 两个程序）
+node scripts/benchmark.mjs             # 基准：12 MP lanczos 缩放 native vs wasm（3 次取中位数）
 node scripts/verify-single-source.mjs  # 「一处改两端生效」的机器验证
-node tests/e2e/smoke.mjs http://localhost:4173  # 真实浏览器端到端
+node tests/e2e/smoke.mjs http://localhost:4173  # 真实浏览器端到端（另有 pdf/pdf-render/video/documents/offline/mime-fallback）
 
 # CI 闸门
 node scripts/check-core-boundary.mjs   # core 里禁止 rayon/fs/thread

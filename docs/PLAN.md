@@ -179,11 +179,15 @@ Phase 4b（待做）：WebCodecs 转码管线、pdf.js 按页渲染+虚拟化、
 - [ ] 三平台 Release 实测出包（tag 触发 CI，本机无完整 Xcode 不出 dmg）
 - [ ] 视频批量队列接入桌面并行
 
-## Phase 6 — 一致性、基准、许可证、README ⬜
+## Phase 6 — 一致性、基准、许可证、README 🔶 收尾中
 
-- 全部 6 项基准（B1–B6）填入 `docs/benchmarks.md`
-- 一致性测试扩展到 PDF/视频
-- README 与能力页的最终校对
+- [x] B1 实测（12 MP lanczos：native 221ms / wasm 411ms / 1.86× / 逐字节一致）→ `docs/benchmark-results.json`
+- [x] B0 已测（浮点差异→确定性 trig）；B2/B3/B4 诚实标「依赖未接入，无法测」
+- [x] B5 部分：PDF 双端一致性 3/3 逐字节相等（`scripts/run-pdf-conformance.mjs`）
+- [x] B6 部分：WebCodecs e2e 通过；与 ffmpeg.wasm 的耗时对比未测（缺 fixture + 可选降级默认不分发）
+- [x] 一致性测试扩展到 PDF（rotate/split/merge），视频靠 e2e + conformance argv 纯函数
+- [x] README 能力矩阵/测试命令/许可证最终校对
+- [x] 基准脚本接入 CI（B1 + PDF 一致性均接入 web job）
 
 ---
 
