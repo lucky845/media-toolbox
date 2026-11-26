@@ -240,7 +240,8 @@ async function main() {
       process.exit(1);
     }
     found[name] = p;
-    const dest = join(sidecarDir, `${name}-${target}`);
+    // Tauri externalBin 硬规则：Windows 必须带 .exe，否则 build script 找不到资源。
+    const dest = join(sidecarDir, `${name}-${target}${exeSuffix}`);
     execSync(`cp "${p}" "${dest}"`, { stdio: 'inherit' });
     await chmod(dest, 0o755);
     log(`✓ ${dest}`);
@@ -262,7 +263,7 @@ async function main() {
   log('');
   log('核验 configure 行：');
   for (const name of ['ffmpeg', 'ffprobe']) {
-    const bin = join(sidecarDir, `${name}-${target}`);
+    const bin = join(sidecarDir, `${name}-${target}${exeSuffix}`);
     if (target !== 'aarch64-apple-darwin' && !target.includes('darwin') && !target.includes('linux')) {
       log(`  ${name}: 跨平台二进制无法在本机执行，跳过（CI 的对应 runner 上会核验）`);
       continue;
