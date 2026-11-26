@@ -52,6 +52,9 @@ jobs:
       - name: 拉取并校验 sidecar（FFmpeg/ffprobe，校验 sha256）
         run: node scripts/fetch-sidecars.mjs --target ${{ matrix.target }}
 
+      - name: 从 PNG 生成全平台图标（含 Windows .ico）
+        run: npx tauri icon src-tauri/icons/icon.png
+
       - name: 生成 release 用合并配置（base + sidecar externalBin）
         shell: bash
         run: |
