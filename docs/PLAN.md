@@ -175,7 +175,7 @@ Phase 4b（待做）：WebCodecs 转码管线、pdf.js 按页渲染+虚拟化、
 - [x] 前端零分叉：`Backend.probeVideo` + VideoPage 走 getBackend（不再 import Web 实现）
 - [x] 本机验证：212 Rust 测试 / 4 Tauri command 测试 / 6 e2e / Tauri 二进制构建+启动
 - [x] LibreOffice headless Word↔PDF command（office_convert + 能力驱动前端切换 + docx 结构化修复）
-- [ ] PDF 高 DPI 阈值放宽（复用 pdf.js，仅 capabilities 调整）
+- [x] PDF 高 DPI 阈值放宽（复用 pdf.js；PdfCaps.maxDpi + render maxPages 参数化）
 - [ ] 三平台 Release 实测出包（tag 触发 CI，本机无完整 Xcode 不出 dmg）
 - [ ] 视频批量队列接入桌面并行
 

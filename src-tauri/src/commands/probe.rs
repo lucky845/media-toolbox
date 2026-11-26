@@ -50,6 +50,8 @@ pub struct PdfCaps {
     pub render: bool,
     pub edit: bool,
     pub max_pages: i64,
+    /// 桌面端 pdf.js 渲染可用更高 DPI（仍跑在 webview 内）
+    pub max_dpi: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +121,7 @@ pub fn probe_capabilities() -> Result<Capabilities, ToolError> {
             render: true,
             edit: true,
             max_pages: -1,
+            max_dpi: 400,
         },
         office: OfficeCaps {
             // LibreOffice 存在 → native；否则结构化（与 Web 同档，但 UI 会常驻提示）

@@ -301,7 +301,7 @@ export class WebBackend implements Backend_ {
         outputContainers: ['mp4', 'webm'],
         audioPassthrough: true,
       },
-      pdf: { render: true, edit: true, maxPages: 100 },
+      pdf: { render: true, edit: true, maxPages: 100, maxDpi: 200 },
       office: { wordToPdf: 'structured', pdfToWord: 'structured' },
       cancel: { hard: false },
       fileSystem: { directoryPicker: dirPicker, savePicker },

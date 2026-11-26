@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDocBackend } from '../../lib/backend/web/docBackend';
 import { getPdfRenderBackend } from '../../lib/backend/web/pdfRenderBackend';
+import { useCapabilities } from '../../store/capabilities';
 import type { PageRange, ToolError } from '../../lib/backend/types';
 
 interface PdfPreviewProps {
@@ -29,6 +30,11 @@ function parseRanges(text: string, pageCount: number): PageRange[] {
 }
 
 export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
+  // 阈值来自 capabilities，不在渲染层/UI 硬编码（规格 D10）。
+  const { caps } = useCapabilities();
+  const maxPages = caps?.pdf.maxPages ?? 100;
+  const maxDpi = caps?.pdf.maxDpi ?? 200;
+  const dpiOptions = [72, 120, 150, 200, 300, 400].filter((d) => d <= maxDpi);
   const [dpi, setDpi] = useState(120);
   const [format, setFormat] = useState<'png' | 'jpeg' | 'webp'>('png');
   const [quality, setQuality] = useState(0.9);
@@ -160,6 +166,7 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
           onProgress: (p) => setProgress({ done: p.done, total: p.total }),
         },
         ac.signal,
+        maxPages,
       );
       if (out.outputs?.length) {
         for (const item of out.outputs) await getDocBackend().saveOutput(item.bytes, item.name);
@@ -185,10 +192,9 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
         <label className="row" style={{ gap: 8 }}>
           <span className="hint">DPI</span>
           <select value={dpi} onChange={(e) => setDpi(Number(e.target.value))} disabled={busy}>
-            <option value={72}>72（小）</option>
-            <option value={120}>120（默认）</option>
-            <option value={150}>150（清晰）</option>
-            <option value={200}>200（高，慢）</option>
+            {dpiOptions.map((d) => (
+              <option key={d} value={d}>{d}{d === 120 ? '（默认）' : d >= 300 ? '（高，慢）' : ''}</option>
+            ))}
           </select>
         </label>
         <label className="row" style={{ gap: 8 }}>
@@ -220,7 +226,7 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
         <button className="primary" onClick={() => void exportImages()} disabled={busy}>
           {busy ? (progress ? `导出中 ${progress.done}/${progress.total}…` : '导出中…') : '导出为图片'}
         </button>
-        <span className="hint">仅渲染视口附近的页；导出范围最多 100 页</span>
+        <span className="hint">仅渲染视口附近的页；导出范围{maxPages > 0 ? `最多 ${maxPages} 页` : '不限页数'}</span>
       </div>
       {notice && <div className="notice info" style={{ marginTop: 10 }}><span>✓</span><div>{notice}</div></div>}
 

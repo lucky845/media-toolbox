@@ -293,13 +293,20 @@ export class PdfRenderBackend {
     params: PdfRenderParams,
     opts: RunOptions,
     signal?: AbortSignal,
+    /** 页数上限来自 capabilities().pdf.maxPages（-1 表示不限）；不再在渲染层硬编码。 */
+    maxPages = 100,
   ): Promise<TaskResult> {
     if (signal?.aborted) throw cancelled();
     const doc = await this.open(file);
     const pages = this.resolvePages(doc, params.pages);
     if (!pages.length) throw { code: 'INVALID_PARAMS', message: '页码范围内没有页面', retryable: false, desktopHint: false } satisfies ToolError;
-    if (pages.length > 100) {
-      throw { code: 'PAGE_LIMIT', message: '在线版单次最多渲染 100 页，请缩小页码范围或使用桌面版', retryable: false, desktopHint: true } satisfies ToolError;
+    if (maxPages > 0 && pages.length > maxPages) {
+      throw {
+        code: 'PAGE_LIMIT',
+        message: `当前形态单次最多渲染 ${maxPages} 页，请缩小页码范围`,
+        retryable: false,
+        desktopHint: true,
+      } satisfies ToolError;
     }
 
     let bytes: Uint8Array = new Uint8Array(0);

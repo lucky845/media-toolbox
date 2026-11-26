@@ -149,7 +149,10 @@ export interface VideoCaps {
 export interface PdfCaps {
   render: boolean;
   edit: boolean;
+  /** 单次渲染页数上限；-1 表示不限（桌面端） */
   maxPages: number;
+  /** 可用最高 DPI；Web 200、桌面更高（渲染仍走 webview 内 pdf.js） */
+  maxDpi?: number;
 }
 
 export interface OfficeCaps {

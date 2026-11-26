@@ -83,10 +83,18 @@ Tauri 二进制                        cargo build 成功，启动无崩溃
 - 验证：Tauri 6 个 command 测试（含 LibreOfficeMissing 路径）+ 新增 `documents.mjs` e2e
   （真实 Chromium 上传 docx → 结构化 → 下载 structured.json，0 错误）。
 
-## 7. 本轮仍未做（按同一模式后续铺开）
+## 7. 第三批：PDF 阈值由 capabilities 驱动（已接入）
 
-- PDF 高 DPI 批量渲染：按用户决策复用 pdf.js，桌面侧只需放宽页数/DPI 阈值（前端 capabilities），
-  无需新 sidecar。
+- 按用户决策，桌面 PDF 渲染复用 webview 内 pdf.js（不新增 sidecar），只放宽阈值：
+  - `PdfCaps` 新增 `maxDpi`；桌面 `probe.rs` 报 `maxPages: -1`（不限）、`maxDpi: 400`，
+    Web 报 `100 / 200`。
+  - `pdfRenderBackend.render()` 的页数上限改为参数 `maxPages`（默认 100），
+    不再在渲染层硬编码；UI `PdfPreview` 从 `caps.pdf` 派生 DPI 选项（72/120/150/200/300/400
+    按 maxDpi 过滤）与页数提示，并把 maxPages 传入渲染。
+- 验证：7 项 e2e 全通过（pdf-render 仍导出 page-001.png），typecheck/六闸门/212 Rust/6 Tauri 全绿。
+
+## 8. 本轮仍未做（按同一模式后续铺开）
+
 - 三平台 Release 实测出包：需 tag 触发 CI，本轮只保证 workflow 配置正确、二进制可构建。
 - 批量队列接入桌面并行（rayon 已在 image command 使用，视频批量尚未）。
 - 本机无 LibreOffice，原生转换的真实验证只能在装有 LO 的机器/CI 上做；本轮验证了错误路径。

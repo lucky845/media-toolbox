@@ -153,7 +153,7 @@ export class DocBackend implements Backend {
       contractVersion: 1,
       image: { formats: [], avif: false, maxPixels: -1, parallel: 1, pngOptimize: false },
       video: { available: false, engines: [], decoders: [], encoders: [], hardwareEncoder: false, maxBytes: -1, maxDurationSec: -1 },
-      pdf: { render: true, edit: true, maxPages: 100 },
+      pdf: { render: true, edit: true, maxPages: 100, maxDpi: 200 },
       office: { wordToPdf: 'structured', pdfToWord: 'structured' },
       cancel: { hard: false },
       fileSystem: { directoryPicker: false, savePicker: false },
