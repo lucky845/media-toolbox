@@ -10,12 +10,27 @@ import { useCapabilities } from '../../store/capabilities';
 type Direction = 'docx2pdf' | 'pdf2docx';
 
 export function DocumentsPage() {
-  const { caps } = useCapabilities();
+  const { caps, summary } = useCapabilities();
   const [file, setFile] = useState<InputRef | null>(null);
   const [direction, setDirection] = useState<Direction>('docx2pdf');
   const [error, setError] = useState<ToolError | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [downloadOpenFailed, setDownloadOpenFailed] = useState(false);
+
+  const openLibreOfficeDownload = async () => {
+    try {
+      const backend = await getBackend();
+      if (!backend.openLibreOfficeDownload) {
+        setDownloadOpenFailed(true);
+        return;
+      }
+      await backend.openLibreOfficeDownload();
+      setDownloadOpenFailed(false);
+    } catch {
+      setDownloadOpenFailed(true);
+    }
+  };
 
   const onFiles = useCallback((fs: File[]) => {
     setError(null);
@@ -33,10 +48,13 @@ export function DocumentsPage() {
   // 能力驱动：桌面有 LibreOffice → 走 office.convert（原生高保真）；
   // 在线版无外部进程 → 退回 office.structure（结构化 + 保真度声明）。
   // 组件只问 capabilities，不 if(isTauri)。
-  const isNative = caps?.office.wordToPdf === 'native';
+  const engine = direction === 'docx2pdf' ? caps?.office.wordToPdf : caps?.office.pdfToWord;
+  const isNative = engine === 'native';
+  const browserConversion = summary?.showBrowserGuidance && engine === 'structured';
+  const conversionAvailable = isNative || browserConversion;
 
   const run = useCallback(async () => {
-    if (!file) return;
+    if (!file || !conversionAvailable) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -61,7 +79,7 @@ export function DocumentsPage() {
     } finally {
       setBusy(false);
     }
-  }, [file, direction, isNative]);
+  }, [file, direction, isNative, conversionAvailable]);
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -85,36 +103,39 @@ export function DocumentsPage() {
           </div>
         )}
         <div className="row" style={{ marginTop: 16 }}>
-          <button className="primary" onClick={run} disabled={!file || busy}>
-            {busy ? '处理中…' : isNative ? '开始原生转换' : '开始结构化转换'}
+          <button className="primary" onClick={run} disabled={!file || busy || !conversionAvailable}>
+            {busy ? '处理中…' : browserConversion ? '开始结构化转换' : '开始转换'}
           </button>
         </div>
       </div>
 
-      {/* 保真度声明：常驻、不可折叠（规格 §15 硬要求） */}
-      <div className="notice" style={{ borderLeftColor: 'var(--amber)' }}>
-        <span aria-hidden="true">⚠️</span>
-        <div>
-          <strong>在线版只做结构化转换，不承诺高保真</strong>
-          <div className="hint" style={{ marginTop: 6 }}>
-            {direction === 'docx2pdf'
-              ? '浏览器内没有 LibreOffice：只转换文本与简单表格，会丢失嵌入字体、分栏、浮动图形、文本框、页眉页脚、脚注、批注、修订、域、目录、公式与复杂排版。'
-              : '只还原文本段落与简单表格：会丢失原版式、图片位置、字体、合并单元格。扫描件需先 OCR（本项目不做 OCR）。'}
-          </div>
-          <div className="hint" style={{ marginTop: 6 }}>
-            当前转换引擎：{isNative ? '桌面版 LibreOffice headless（保真度高，但仍非无损）' : '在线版结构化（保真度有限）'}。
-            需要高保真请用桌面版。
-          </div>
-        </div>
-      </div>
+      {browserConversion && (
+        <LimitNotice kind="fidelity" title="在线版只做结构化转换">
+          {direction === 'docx2pdf'
+            ? '仅转换文本与简单表格。嵌入字体、分栏、页眉页脚、批注与其他复杂排版可能丢失。'
+            : '仅还原文本段落与简单表格。原版式、图片位置和字体可能丢失。扫描件需先识别文字。'}
+        </LimitNotice>
+      )}
+      {isNative && (
+        <LimitNotice kind="fidelity" title="LibreOffice 原生转换">
+          转换在本机完成。字体、复杂排版和扫描页的转换效果取决于源文件。
+        </LimitNotice>
+      )}
+      {summary && !summary.showBrowserGuidance && !isNative && (
+        <LimitNotice kind="capability" title="原生文档转换需要 LibreOffice">
+          <p>请下载适合你系统的 LibreOffice。安装完成后，退出并重新打开工具箱。</p>
+          <button type="button" className="btn ghost" onClick={() => void openLibreOfficeDownload()}>
+            打开 LibreOffice 官方下载页
+          </button>
+          {downloadOpenFailed && (
+            <p role="status">无法打开系统浏览器。请手动访问 <code>https://www.libreoffice.org/download/</code>。</p>
+          )}
+        </LimitNotice>
+      )}
 
       {result && <div className="notice info"><span>✓</span><div>{result}</div></div>}
       {error && <ErrorBanner error={error} />}
 
-      <LimitNotice kind="capability" title="为什么浏览器不能做高保真转换">
-        Word/PDF 的高保真转换依赖 LibreOffice 这类原生排版引擎。浏览器沙箱无法启动外部进程。
-        桌面版把 LibreOffice 打包进安装包（MPL-2.0），可离线高保真转换；复杂排版仍可能丢失。
-      </LimitNotice>
     </div>
   );
 }

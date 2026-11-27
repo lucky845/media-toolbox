@@ -8,17 +8,14 @@ import type { InputRef, Progress, ToolError, VideoProbeResult } from '../../lib/
 import { useCapabilities } from '../../store/capabilities';
 import { buildParams, defaultForm, describeParams, formatDuration, type VideoFormState } from './videoForm';
 
-const ACCEPT = '.mp4,video/mp4';
+const BROWSER_INPUT = '.mp4';
+const LOCAL_INPUT = '.mp4,.mov,.mkv,.webm,.avi,.m4v,.mpeg,.mpg,.ts,.wmv';
 
-/** 视频轻量页：mp4box 解封装 + WebCodecs 编解码 + muxer 封装，全程在本机浏览器内完成。
- *
- * 限制（UI 常驻，见 docs/COMPATIBILITY.md）：
- * - 输入仅 MP4(ISOBMFF)/H.264；输出 MP4(H.264) 或 WebM(VP9)；无硬件编码。
- * - 音频仅「MP4 输出 + 源 AAC + 保留音轨」时无损透传，其余情况无音轨。
- * - 可选 ffmpeg.wasm 降级只在用户显式点击时加载（GPL-2.0-or-later）。
- */
 export function VideoPage() {
-  const { caps } = useCapabilities();
+  const { caps, summary } = useCapabilities();
+  const browserGuidance = summary?.showBrowserGuidance;
+  const nativePicker = caps?.fileSystem.nativeFilePicker;
+  const accept = nativePicker ? LOCAL_INPUT : BROWSER_INPUT;
   const [file, setFile] = useState<InputRef | null>(null);
   const [probe, setProbe] = useState<VideoProbeResult | null>(null);
   const [form, setForm] = useState<VideoFormState>(() => defaultForm());
@@ -28,14 +25,11 @@ export function VideoPage() {
   const [result, setResult] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
 
-  const onFiles = useCallback(async (files: File[]) => {
+  const loadInput = useCallback(async (ref: InputRef) => {
     setError(null);
     setProbe(null);
     setResult(null);
     setProgress(null);
-    const f = files[0];
-    if (!f) return;
-    const ref: InputRef = { file: f, name: f.name, size: f.size };
     setFile(ref);
     setBusy(true);
     try {
@@ -49,11 +43,16 @@ export function VideoPage() {
     }
   }, []);
 
+  const onFiles = (files: File[]) => {
+    const f = files[0];
+    if (f) void loadInput({ file: f, name: f.name, size: f.size });
+  };
+
   const pick = useCallback(async () => {
     const backend = await getBackend();
-    const refs = await backend.pickFiles(ACCEPT, false);
-    if (refs[0]?.file) await onFiles([refs[0].file]);
-  }, [onFiles]);
+    const refs = await backend.pickFiles(accept, false);
+    if (refs[0]) await loadInput(refs[0]);
+  }, [accept, loadInput]);
 
   const run = useCallback(async () => {
     if (!file || busy) return;
@@ -74,7 +73,7 @@ export function VideoPage() {
         },
       );
       await backend.saveOutput(out.bytes, out.outputName);
-      setResult(`已生成 ${out.outputName}（${formatBytes(out.bytes.length)}，${out.meta.savingsText}）`);
+      setResult(`已生成 ${out.outputName}（${out.bytes.length > 0 ? `${formatBytes(out.bytes.length)}，` : ''}${out.meta.savingsText}）`);
     } catch (e) {
       setError(e as ToolError);
     } finally {
@@ -87,38 +86,36 @@ export function VideoPage() {
     controller.current?.abort();
   }, []);
 
-  // 视频阈值取自 caps.video（200 MB / 300 秒），不能用图片通用的 limits.maxBytes（20 MB）。
-  const videoMaxBytes = caps?.video.maxBytes ?? 200 * 1024 * 1024;
-  const videoMaxDuration = caps?.video.maxDurationSec ?? 300;
-  const durationBlocked = probe && probe.durationSec > videoMaxDuration;
-  const sizeBlocked = file && file.size > videoMaxBytes;
+  const videoMaxBytes = caps?.video.maxBytes ?? -1;
+  const videoMaxDuration = caps?.video.maxDurationSec ?? -1;
+  const durationBlocked = probe && videoMaxDuration >= 0 && probe.durationSec > videoMaxDuration;
+  const sizeBlocked = file && videoMaxBytes >= 0 && file.size > videoMaxBytes;
 
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
-        <h2>导入视频（MP4 / H.264）</h2>
-        <p className="hint">
-          在线版用浏览器原生 WebCodecs 转码：解封装仅支持 MP4，输出 MP4(H.264) / WebM(VP9)，
-          文件始终留在本机，不上传。桌面版可处理全格式与更大文件。
-        </p>
-        <DropZone accept={ACCEPT} multiple={false} onFiles={onFiles} onPick={pick} disabled={busy} />
+        <h2>{browserGuidance ? '导入视频（MP4 / H.264）' : '导入视频'}</h2>
+        {browserGuidance && <p className="hint">使用浏览器原生 WebCodecs 转码，支持输出 MP4（H.264）或 WebM（VP9）。</p>}
+        {nativePicker ? (
+          <button type="button" className="btn" onClick={pick} disabled={busy}>选择本机视频</button>
+        ) : (
+          <DropZone accept={accept} multiple={false} onFiles={onFiles} onPick={pick} disabled={busy || !summary} />
+        )}
       </div>
 
       <div className="card">
         <h2>探测到的编解码器</h2>
         <dl className="kv" style={{ marginTop: 10 }}>
-          <dt>WebCodecs 可用</dt>
-          <dd>{caps?.video.available ? '是' : '否（本浏览器不支持，转码不可用）'}</dd>
+          <dt>转码引擎</dt>
+          <dd>{caps ? (caps.video.available ? (browserGuidance ? 'WebCodecs' : 'FFmpeg') : (browserGuidance ? 'WebCodecs 不可用' : '未检测到 FFmpeg')) : '探测中…'}</dd>
           <dt>支持解码</dt>
           <dd className="mono">{(caps?.video.decoders ?? []).join(', ') || '—'}</dd>
           <dt>支持编码</dt>
           <dd className="mono">{(caps?.video.encoders ?? []).join(', ') || '—'}</dd>
           <dt>硬件编码</dt>
-          <dd>{caps?.video.hardwareEncoder ? '可用' : '不可用（在线版不使用）'}</dd>
-          <dt>文件大小上限</dt>
-          <dd className="mono">{formatBytes(videoMaxBytes)}</dd>
-          <dt>时长上限</dt>
-          <dd className="mono">{Math.round(videoMaxDuration / 60)} 分钟</dd>
+          <dd>{caps ? (caps.video.hardwareEncoder ? '可用' : '不可用') : '—'}</dd>
+          {videoMaxBytes >= 0 && <><dt>文件大小上限</dt><dd className="mono">{formatBytes(videoMaxBytes)}</dd></>}
+          {videoMaxDuration >= 0 && <><dt>时长上限</dt><dd className="mono">{Math.round(videoMaxDuration / 60)} 分钟</dd></>}
         </dl>
       </div>
 
@@ -137,17 +134,17 @@ export function VideoPage() {
               <dt>音轨</dt>
               <dd>
                 {probe.hasAudio
-                  ? `${probe.audioCodec ?? '未知'}${probe.audioPassthrough ? '（可无损透传）' : '（无法透传，输出将无音轨）'}`
+                  ? `${probe.audioCodec ?? '有音轨'}${browserGuidance ? (probe.audioPassthrough ? '（可无损透传）' : '（无法透传）') : ''}`
                   : '无'}
               </dd>
             </dl>
           )}
-          {sizeBlocked && (
+          {browserGuidance && sizeBlocked && (
             <div style={{ marginTop: 12 }}>
               <DesktopCta reason={`文件 ${formatBytes(file.size)}，超过在线版 ${formatBytes(videoMaxBytes)} 上限。`} />
             </div>
           )}
-          {durationBlocked && (
+          {browserGuidance && durationBlocked && (
             <div style={{ marginTop: 12 }}>
               <DesktopCta reason={`视频 ${formatDuration(probe.durationSec)}，超过在线版 ${formatDuration(videoMaxDuration)} 上限。`} />
             </div>
@@ -183,11 +180,11 @@ export function VideoPage() {
           <label className="check">
             <input type="checkbox" checked={form.keepAudio}
               onChange={(e) => setForm((f) => ({ ...f, keepAudio: e.target.checked }))} />
-            尝试保留音轨（仅 MP4 + AAC 源）
+            {browserGuidance ? '尝试保留音轨（仅 MP4 + AAC 源）' : '保留音轨'}
           </label>
         </div>
         <p className="hint mono" style={{ marginTop: 10 }}>{describeParams(form)}</p>
-        {form.container === 'webm' && probe?.hasAudio && (
+        {browserGuidance && form.container === 'webm' && probe?.hasAudio && (
           <p className="hint">WebM 输出不重编码音频，将生成无音轨视频；需要音轨请选 MP4 或用桌面版。</p>
         )}
       </div>
@@ -205,31 +202,20 @@ export function VideoPage() {
       )}
 
       <div className="row">
-        <button type="button" className="btn" disabled={!file || busy || !caps?.video.available || Boolean(sizeBlocked || durationBlocked)} onClick={run}>
+        <button type="button" className="btn" disabled={!file || !probe || busy || !caps?.video.available || Boolean(sizeBlocked || durationBlocked)} onClick={run}>
           {busy ? '处理中…' : '开始转码'}
         </button>
         {result && <span className="hint">{result}</span>}
       </div>
 
-      <LimitNotice kind="capability" title="编解码器由浏览器决定">
-        WebCodecs 复用浏览器自带的编解码器：Chrome/Edge 94+、Firefox 130+、Safari 16.4+
-        （仅 video，音频编码需 26+）。本页按 isConfigSupported 逐个探测，不支持的配置不会假装可用。
-      </LimitNotice>
-      <LimitNotice kind="capability" title="容器与音轨限制">
-        解封装只支持 MP4(H.264)；MKV/MOV/HEVC 请下载桌面版。音频仅「MP4 输出 + 源 AAC + 保留音轨」时无损透传，
-        其余情况输出无音轨。在线版没有硬件编码、没有 FFmpeg/LibreOffice。
-      </LimitNotice>
-      <LimitNotice kind="capability" title="可选 ffmpeg.wasm 降级（GPL）">
-        若浏览器编解码器不足，可手动下载 ffmpeg.wasm 降级包（@ffmpeg/core，
-        <strong>GPL-2.0-or-later</strong>）。它约 31 MB / 9.7 MB gzip，单线程且慢，
-        <strong>默认不加载、不预取</strong>。点击前会显示许可证说明并提供对应源码地址。
-      </LimitNotice>
-
-      <div className="card">
-        <h2>需要全格式？</h2>
-        <p className="hint">桌面版捆绑 FFmpeg sidecar（LGPL-2.1-or-later 构建），全格式、硬件编码、批量并行，完全离线。</p>
-        <a href={DESKTOP_RELEASE_URL} target="_blank" rel="noreferrer noopener">下载桌面版 →</a>
-      </div>
+      {browserGuidance && (
+        <>
+          <LimitNotice kind="capability" title="编解码器由浏览器决定">
+            输入仅支持 MP4（H.264）。保留音轨需要 MP4 输出和 AAC 源音轨，其余情况输出无音轨。
+          </LimitNotice>
+          <a href={DESKTOP_RELEASE_URL} target="_blank" rel="noreferrer noopener">下载桌面版 →</a>
+        </>
+      )}
     </div>
   );
 }

@@ -21,24 +21,24 @@ describe('summarizeCapabilities', () => {
     { ...desktop, video: { ...desktop.video, available: false, engines: [] } },
   ])('keeps the desktop identity when optional functionality is unavailable', (caps) => {
     expect(summarizeCapabilities(caps)).toMatchObject({
-      label: '桌面版 · 部分功能受限',
-      formDescription: '桌面版（部分功能受限）',
+      label: '桌面版',
+      formDescription: '桌面版',
       offlineDescription: '完全离线',
-      fullCapability: false,
+      showBrowserGuidance: false,
     });
   });
 
   it('keeps desktop offline status even when the optional local processing capability is unavailable', () => {
     expect(summarizeCapabilities({ ...desktop, offline: { installed: false, serviceWorker: false } })).toMatchObject({
-      label: '桌面版 · 部分功能受限',
+      label: '桌面版',
       offlineDescription: '完全离线',
     });
   });
 
-  it('shows the full desktop badge when both native components are available', () => {
+  it('shows the same desktop badge when both native components are available', () => {
     expect(summarizeCapabilities(desktop)).toMatchObject({
-      label: '桌面版 · 全量能力',
-      fullCapability: true,
+      label: '桌面版',
+      showBrowserGuidance: false,
     });
   });
 
@@ -49,7 +49,7 @@ describe('summarizeCapabilities', () => {
     expect(summarizeCapabilities({ ...desktop, kind: 'web', offline: { installed, serviceWorker: true } })).toMatchObject({
       label: '在线版 · 轻量模式',
       offlineDescription,
-      fullCapability: false,
+      showBrowserGuidance: true,
     });
   });
 });

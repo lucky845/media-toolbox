@@ -337,8 +337,8 @@ export function PdfPage() {
       )}
 
       <LimitNotice kind="fidelity" title="PDF 处理说明">
-        旋转、拆分、合并与提取均在本机完成。桌面版的 PDF 文件输出保存到列表首份文件所在目录。PDF→图片由 PDF.js 逐页渲染。PDF↔Word
-        高保真转换需桌面版；在线版只做结构化处理。
+        旋转、拆分、合并、提取和图片导出均在本机完成。
+        {nativePicker && ' 编辑后的 PDF 保存到列表首份文件所在目录。'}
       </LimitNotice>
     </div>
   );

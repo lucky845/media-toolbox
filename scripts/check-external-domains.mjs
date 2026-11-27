@@ -13,6 +13,7 @@ const dist = join(repo, 'dist');
 /** 允许出现的域名（含用途说明） */
 const ALLOWED = new Map([
   ['github.com', '桌面版下载链接（<a href>，用户点击才导航）'],
+  ['www.libreoffice.org', '桌面文档转换安装指引中的官方下载地址'],
   ['react.dev', 'React 错误提示 URL（仅在抛错时拼进 console 字符串，非资源加载）'],
   ['lucky845.github.io', '项目页备用地址'],
   ['media-toolbox.lucky845.top', '本站自身域（CNAME / canonical）'],
