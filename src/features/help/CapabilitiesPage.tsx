@@ -1,5 +1,6 @@
 import { useCapabilities } from '../../store/capabilities';
 import { LimitNotice } from '../../components/LimitNotice';
+import type { Limits } from '../../lib/backend/types';
 import { DESKTOP_RELEASE_URL, formatBytes } from '../../lib/errors';
 
 /**
@@ -21,14 +22,12 @@ export function CapabilitiesPage() {
             <dd>{summary?.formDescription ?? '未知'}</dd>
             <dt>契约版本</dt>
             <dd className="mono">v{caps.contractVersion}</dd>
-            <dt>跨源隔离</dt>
-            <dd>
-              {caps.env.crossOriginIsolated ? (
-                <span className="ok-text">已隔离（可用多线程）</span>
-              ) : (
-                <span className="warn-text">未隔离 —— 这是本站单线程的根本原因</span>
-              )}
-            </dd>
+            {summary?.showBrowserGuidance && (
+              <>
+                <dt>跨源隔离</dt>
+                <dd>{caps.env.crossOriginIsolated ? '已隔离' : '未隔离'}</dd>
+              </>
+            )}
             <dt>并行度</dt>
             <dd className="mono">{caps.image.parallel}</dd>
             <dt>取消能力</dt>
@@ -49,10 +48,37 @@ export function CapabilitiesPage() {
         )}
       </div>
 
+      {summary?.showBrowserGuidance && <BrowserHelp limits={limits} />}
+      {caps && summary && !summary.showBrowserGuidance && (
+        <div className="card">
+          <h2>本机处理能力</h2>
+          <dl className="kv">
+            <dt>图片输出</dt>
+            <dd>{caps.image.formats.join(' / ') || '—'}</dd>
+            <dt>PDF 处理</dt>
+            <dd>{[caps.pdf.edit && '合并、拆分、旋转、提取', caps.pdf.render && '导出图片'].filter(Boolean).join(' / ') || '不可用'}</dd>
+            <dt>视频转码</dt>
+            <dd>{caps.video.available ? 'FFmpeg' : '未检测到 FFmpeg'}</dd>
+            <dt>Word ↔ PDF</dt>
+            <dd>
+              {caps.office.wordToPdf === 'native'
+                ? 'LibreOffice 原生转换'
+                : <a href="#/documents">查看 LibreOffice 下载与安装说明</a>}
+            </dd>
+          </dl>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrowserHelp({ limits }: { limits: Limits | null }) {
+  return (
+    <>
       <div className="card">
         <h2>能力矩阵</h2>
         <p className="hint">
-          下表是**当前形态**的真实能力。在线版的每处限制都给了原因 —— 这不是「暂时没做」，而是平台边界。
+          下表对比两个版本的处理能力。
         </p>
         <table>
           <thead>
@@ -79,11 +105,11 @@ export function CapabilitiesPage() {
             <tr>
               <td>视频压缩 / 转码</td>
               <td>✅ 轻量：MP4(H.264)→MP4/WebM</td>
-              <td>✅ 全格式 + 硬件编码</td>
+              <td>✅ FFmpeg 原生转码</td>
               <td>
                 WebCodecs 原生编解码，mp4box.js 解封装，≤200 MB / ≤5 分钟。
                 输入仅 MP4/H.264、输出 MP4(H.264)/WebM(VP9)，无硬件编码、不保证 MKV/MOV/HEVC；
-                音轨仅 MP4 + 源 AAC 可无损透传，否则无音轨。全格式请下载桌面版（FFmpeg sidecar）。
+                音轨仅 MP4 + 源 AAC 可无损透传，否则无音轨。桌面版使用 FFmpeg，支持更多输入格式。
               </td>
             </tr>
             <tr>
@@ -148,19 +174,17 @@ export function CapabilitiesPage() {
           </LimitNotice>
 
           <LimitNotice kind="capability" title="wasm 只有 32 位地址空间">
-            理论上限 4 GB，但浏览器单个页面实际可用的远低于此。为了让「处理到一半 OOM 崩溃」
-            不发生在你身上，我们对超过阈值的文件**在开始前就拒绝**，并给出桌面版引导。
+            理论上限 4 GB，浏览器实际可用的内存通常更少。在线版会在处理前检查文件是否超过上限。
           </LimitNotice>
 
           <LimitNotice kind="capability" title="编解码器由浏览器决定">
             在线版的视频转码走 WebCodecs，它复用浏览器/系统自带的编解码器。这意味着：能压什么格式、
-            有没有硬件加速，取决于你用的浏览器与操作系统，而不是我们能控制的。需要「所有格式都能转」
-            就只能用桌面版。
+            有没有硬件加速，取决于你用的浏览器与操作系统，而不是我们能控制的。桌面版通过 FFmpeg 支持更多输入格式。
           </LimitNotice>
 
           <LimitNotice kind="capability" title="不能调用 LibreOffice / FFmpeg 原生程序">
             浏览器沙箱里无法启动外部进程。所以 Word↔PDF 只能做结构化转换，视频只能用浏览器的编解码器。
-            桌面版把这些程序打包进安装包（FFmpeg + LibreOffice），不需要你另外安装。
+            桌面版使用随包提供的 FFmpeg。原生文档转换需要 LibreOffice。
           </LimitNotice>
         </div>
       </div>
@@ -168,13 +192,12 @@ export function CapabilitiesPage() {
       <div className="card">
         <h2>桌面版</h2>
         <p className="hint">
-          桌面版是同一个仓库的 Tauri 应用：完全离线、无网络请求、把 FFmpeg 与 LibreOffice
-          打包进安装包。macOS 版本目前未签名，首次打开需要右键 → 打开。
+          桌面版可离线处理文件，随包提供 FFmpeg。原生文档转换需要 LibreOffice。
         </p>
         <a href={DESKTOP_RELEASE_URL} target="_blank" rel="noreferrer noopener">
           下载桌面版 →
         </a>
       </div>
-    </div>
+    </>
   );
 }

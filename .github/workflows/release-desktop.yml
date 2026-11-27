@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    if: startsWith(github.ref, 'refs/tags/v')
     name: ${{ matrix.label }}
     strategy:
       fail-fast: false
@@ -45,33 +46,24 @@ jobs:
 
       - name: macOS FFmpeg 编译依赖
         if: matrix.os == 'macos-latest'
-        run: brew install nasm pkg-config libvpx
+        run: brew install nasm pkg-config
 
       - run: npm ci
 
-      - name: 拉取并校验 sidecar（FFmpeg/ffprobe，校验 sha256）
+      - name: 准备并检查 sidecar（FFmpeg/ffprobe）
         run: node scripts/fetch-sidecars.mjs --target ${{ matrix.target }}
-
-      - name: 从 PNG 生成全平台图标（含 Windows .ico）
-        run: npx tauri icon src-tauri/icons/icon.png
 
       - name: 生成 release 用合并配置（base + sidecar externalBin）
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, os
-          base = json.load(open('src-tauri/tauri.conf.json'))
-          side = json.load(open('src-tauri/tauri.sidecar.conf.json'))
-          for k, v in side.get('bundle', {}).items():
-              base.setdefault('bundle', {}).setdefault(k, v)
-          # Windows 打包必须有 .ico（tauri icon 已生成到 src-tauri/icons/icon.ico）
-          icons = base['bundle'].setdefault('icon', [])
-          if 'icons/icon.ico' not in icons:
-              icons.append('icons/icon.ico')
-          # productName 统一由 tauri-action 的 productName 输入注入（MediaToolbox，无空格），
-          # 同时解决 WiX code page 936 与文件名前导下划线问题，这里不再单独覆盖。
-          json.dump(base, open('src-tauri/tauri.release.conf.json', 'w'))
-          print('merged -> src-tauri/tauri.release.conf.json; productName =', base.get('productName'))
+          import json
+          with open('src-tauri/tauri.sidecar.conf.json', encoding='utf-8') as source:
+              config = json.load(source)
+          # 使用 ASCII 产品名以兼容 WiX 和发布资产命名。
+          config['productName'] = 'MediaToolbox'
+          with open('src-tauri/tauri.release.conf.json', 'w', encoding='utf-8') as output:
+              json.dump(config, output)
           PY
 
       - name: 构建前端
@@ -88,10 +80,7 @@ jobs:
           releaseBody: |
             见 CHANGELOG.md。
 
-            **macOS 未签名**：首次打开需在「应用程序」里右键 → 打开，
-            或到「系统设置 → 隐私与安全性」点「仍要打开」。
-            这是零成本约束的直接后果（Apple 开发者账号 $99/年）。
+            **macOS 安装说明**：此安装包适用于 Apple 芯片，采用 ad hoc 签名，未经 Apple 公证。挂载 DMG 后，把应用拖到「应用程序」再启动。「仍要打开」仅在 macOS 允许为这次启动创建例外时出现。若 DMG 无法挂载、系统提示应用已损坏，或没有提供启动例外，请记录错误原文和 macOS 版本并联系维护者。
 
-            **许可证**：桌面版捆绑的 FFmpeg 为 LGPL-2.1-or-later 构建（不含 libx264/x265），
-            LibreOffice 为 MPL-2.0。完整清单见仓库的 THIRD_PARTY_NOTICES.md。
+            **许可证**：macOS 随包提供 FFmpeg（LGPL-2.1+）和 libvpx（BSD）的许可证。Windows 和 Linux 随包提供 BtbN 发行包的 FFmpeg 许可证（LGPL-3.0）与上游链接。详见仓库 THIRD_PARTY_NOTICES.md。
           args: --target ${{ matrix.target }} --config "${{ github.workspace }}/src-tauri/tauri.release.conf.json"

@@ -54,7 +54,7 @@
 
 ## 桌面版
 
-桌面版不需要任何服务、不需要联网。FFmpeg 与 LibreOffice 随安装包分发，无需用户预装。
+桌面版在本机处理文件，无需联网。FFmpeg 随安装包分发。高保真 Office 转换需要另行安装 LibreOffice，其余功能可以独立使用。
 
 | 源文件 | 形态 | 说明 |
 |---|---|---|
@@ -65,8 +65,7 @@
 | [Linux x64 AppImage](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-linux-x64.AppImage) | `.AppImage` | 183 MB |
 
 > [!WARNING]
-> **macOS 包未签名**（零成本约束：Apple 开发者账号 $99/年）。首次打开需在「应用程序」里右键 → 打开，
-> 或到「系统设置 → 隐私与安全性」点「仍要打开」。
+> macOS 安装包适用于 Apple 芯片，当前公开版本未经 Apple 公证。双击 DMG 后，将应用拖到「应用程序」，再从那里启动。若 Gatekeeper 阻止启动，先尝试一次，再到「系统设置 → 隐私与安全性」查看是否提供「仍要打开」。该按钮仅适用于可覆盖的未识别开发者/未公证提示；如果 DMG 校验或挂载失败、系统报告已损坏，或按钮不存在，不要绕过安全检查，请从 GitHub Releases 重新下载，或将错误原文和 macOS 版本发给维护者。
 
 从源码构建：
 

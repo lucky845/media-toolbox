@@ -309,6 +309,8 @@ export interface Backend {
   pickFiles(accept: string, multiple: boolean): Promise<InputRef[]>;
   /** 保存结果：Web 触发下载，桌面写文件 */
   saveOutput(bytes: Uint8Array, name: string, options?: { directDownload?: boolean }): Promise<'downloaded' | 'saved' | 'cancelled'>;
+  /** 在系统浏览器中打开 LibreOffice 官方下载页。 */
+  openLibreOfficeDownload?(): Promise<void>;
   /** 释放资源（worker / 事件监听） */
   dispose(): void;
   /**

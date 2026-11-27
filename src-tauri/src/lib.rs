@@ -38,6 +38,7 @@ pub fn run() {
             commands::video::video_extract_frame,
             commands::video::video_extract_audio,
             commands::office::office_convert,
+            commands::office::open_libreoffice_download,
             commands::pdf::pdf_probe,
             commands::pdf::pdf_read_preview,
             commands::pdf::pdf_run,

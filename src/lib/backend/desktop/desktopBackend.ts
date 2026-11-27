@@ -220,13 +220,15 @@ export class DesktopBackend implements Backend {
         }
         const p = task.params;
         const r = await invoke<VideoResultMeta & { outputPath: string }>('video_transcode', {
-          inputPath: task.input.path,
-          container: p.container,
-          bitrateMbps: p.bitrateMbps,
-          scalePercent: p.scalePercent,
-          fps: p.fps > 0 ? p.fps : undefined,
-          keepAudio: p.keepAudio,
-          taskId: opts.taskId,
+          args: {
+            inputPath: task.input.path,
+            container: p.container,
+            bitrateMbps: p.bitrateMbps,
+            scalePercent: p.scalePercent,
+            fps: p.fps > 0 ? p.fps : undefined,
+            keepAudio: p.keepAudio,
+            taskId: opts.taskId,
+          },
         });
         // 桌面转码已写盘；只回传一个空字节占位（预览/保存由 UI 用 outputPath 处理）。
         return {
@@ -282,7 +284,7 @@ export class DesktopBackend implements Backend {
       durationSec: number;
       formatName: string;
       hasAudio: boolean;
-    }>('video_probe', { inputPath: ref.path });
+    }>('video_probe', { args: { inputPath: ref.path } });
     return {
       codec: r.codec,
       width: r.width,
@@ -332,6 +334,10 @@ export class DesktopBackend implements Backend {
     if (!target) return 'cancelled';
     await invoke('write_output_file', { path: target, data: Array.from(bytes) });
     return 'saved';
+  }
+
+  openLibreOfficeDownload(): Promise<void> {
+    return invoke('open_libreoffice_download');
   }
 
   dispose(): void {

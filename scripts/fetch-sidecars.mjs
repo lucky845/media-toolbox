@@ -11,7 +11,7 @@
 //   node scripts/fetch-sidecars.mjs --check        # 只校验已存在的文件
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, readdir, stat, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, readdir, stat, writeFile, chmod, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -74,7 +74,10 @@ function verifyLicense(bin) {
   } catch (e) {
     return { ok: false, reason: `无法执行 ${bin}: ${e.message}` };
   }
-  const configureLine = out.split('\n').find((l) => l.includes('--enable')) ?? '';
+  const configureLine = out.split('\n').find((line) => line.startsWith('configuration:'));
+  if (!configureLine) {
+    return { ok: false, reason: `无法读取 ${bin} 的 configuration 行` };
+  }
   const bad = ['--enable-gpl', '--enable-nonfree', '--enable-libx264', '--enable-libx265'].filter((f) =>
     configureLine.includes(f),
   );
@@ -86,6 +89,16 @@ function verifyLicense(bin) {
     };
   }
   return { ok: true, configureLine, version: out.split('\n')[0] };
+}
+
+async function prepareMacLicenseBundle(ffmpegSourceDir, vpxSourceDir) {
+  const licenseDir = join(sidecarDir, 'THIRD_PARTY_LICENSES');
+  await mkdir(licenseDir, { recursive: true });
+  await copyFile(join(repo, 'THIRD_PARTY_NOTICES.md'), join(licenseDir, 'THIRD_PARTY_NOTICES.md'));
+  await copyFile(join(ffmpegSourceDir, 'COPYING.LGPLv2.1'), join(licenseDir, 'FFmpeg-LGPL-2.1.txt'));
+  for (const file of ['LICENSE', 'PATENTS']) {
+    await copyFile(join(vpxSourceDir, file), join(licenseDir, `libvpx-${file}.txt`));
+  }
 }
 
 async function main() {
@@ -131,9 +144,33 @@ async function main() {
   if (src.kind === 'build') {
     // macOS 没有可下载的 LGPL 构建（BtbN 只提供 win/linux）。在 CI runner 上源码编译：
     // 只开 LGPL 兼容编码器 + 系统 VideoToolbox/AudioToolbox，绝不引入 x264/x265/nonfree。
-    // 静态链接（--enable-static --disable-shared）以便只需分发两个二进制、不需要附带 dylib。
+    // FFmpeg 和 libvpx 一起静态构建，避免将 runner 的 Homebrew dylib 路径写入产物。
     log('macOS：源码编译 LGPL FFmpeg（无 x264/x265；H.264 走系统 VideoToolbox）…');
-    const buildDir = join(repo, '.sidecar-tmp', 'ffmpeg-src');
+    const tmp = join(repo, '.sidecar-tmp');
+    const buildDir = join(tmp, 'ffmpeg-src');
+    const vpxSource = join(tmp, 'libvpx-v1.17.0');
+    const vpxBuild = join(tmp, 'libvpx-build-arm64');
+    const vpxPrefix = join(tmp, 'libvpx-static-arm64');
+    const deploymentTarget = '11.0';
+    const buildEnv = { ...process.env, MACOSX_DEPLOYMENT_TARGET: deploymentTarget };
+    const jobs = process.env.JOBS ?? '4';
+    await mkdir(vpxBuild, { recursive: true });
+    if (!existsSync(join(vpxSource, 'configure'))) {
+      execFileSync('git', [
+        'clone', '--depth', '1', '--branch', 'v1.17.0',
+        'https://github.com/webmproject/libvpx.git', vpxSource,
+      ], { stdio: 'inherit', cwd: repo });
+    }
+    // Homebrew 的静态库也可能要求比应用更高的 macOS 版本，因此从源码指定最低版本。
+    const vpxOptions = { stdio: 'inherit', cwd: vpxBuild, env: buildEnv };
+    execFileSync(join(vpxSource, 'configure'), [
+      '--target=arm64-darwin20-gcc', `--prefix=${vpxPrefix}`,
+      `--extra-cflags=-mmacosx-version-min=${deploymentTarget}`,
+      '--enable-static', '--disable-shared',
+      '--disable-examples', '--disable-tools', '--disable-docs', '--disable-unit-tests',
+    ], vpxOptions);
+    execFileSync('make', [`-j${jobs}`], vpxOptions);
+    execFileSync('make', ['install'], vpxOptions);
     await mkdir(buildDir, { recursive: true });
     const clone = () => execFileSync('git', [
       'clone', '--depth', '1', '--branch', 'n7.1',
@@ -158,16 +195,20 @@ async function main() {
       '--disable-doc', '--disable-debug',
       '--enable-ffmpeg', '--enable-ffprobe',
       '--enable-videotoolbox', '--enable-audiotoolbox',
+      // 禁止 pkg-config 自动发现 runner 上的 X11/XCB/Homebrew 动态库。
+      '--disable-autodetect', '--disable-xlib', '--disable-libxcb',
       '--enable-libvpx',
+      `--extra-cflags=-I${join(vpxPrefix, 'include')}`,
+      `--extra-ldflags=-L${join(vpxPrefix, 'lib')}`,
+      '--extra-libs=-lvpx -framework Security',
       // 不启用 libsvtav1：FFmpeg n7.1 的 libsvtav1 wrapper 与新 Homebrew SVT-AV1 API 不兼容
       // （enable_adaptive_quantization 字段已移除）；AV1 编码对档位 L 非必需，H.264 走 VideoToolbox。
       // 安全：显式不启用任何 GPL/nonfree 组件（configure 默认即关闭，这里写明便于审计）
       '--disable-gpl', '--disable-nonfree',
     ];
-    execFileSync('./configure', configure, { stdio: 'inherit', cwd: buildDir });
-    const jobs = process.env.JOBS ?? '4';
-    execFileSync('make', [`-j${jobs}`], { stdio: 'inherit', cwd: buildDir });
-    execFileSync('make', ['install'], { stdio: 'inherit', cwd: buildDir });
+    execFileSync('./configure', configure, { stdio: 'inherit', cwd: buildDir, env: buildEnv });
+    execFileSync('make', [`-j${jobs}`], { stdio: 'inherit', cwd: buildDir, env: buildEnv });
+    execFileSync('make', ['install'], { stdio: 'inherit', cwd: buildDir, env: buildEnv });
 
     for (const name of ['ffmpeg', 'ffprobe']) {
       const from = join(prefix, 'bin', name);
@@ -180,13 +221,28 @@ async function main() {
         log(v.reason);
         process.exit(1);
       }
+      const linkage = execFileSync('otool', ['-L', dest], { encoding: 'utf8' });
+      const nonSystemDeps = linkage.split('\n').slice(1).filter((line) =>
+        line.trim() && !line.trim().startsWith('/System/Library/') && !line.trim().startsWith('/usr/lib/'),
+      );
+      if (nonSystemDeps.length > 0) {
+        log(`✗ ${name}-${target} 含非系统动态依赖：\n${nonSystemDeps.join('\n')}`);
+        process.exit(1);
+      }
+      log(`✓ ${name}-${target} 无 Homebrew/第三方动态库依赖`);
+      const minVersions = execFileSync('otool', ['-l', dest], { encoding: 'utf8' })
+        .split('\n').filter((line) => line.includes('minos ')).map((line) => line.trim().split(/\s+/).at(-1));
+      if (minVersions.some((version) => Number.parseFloat(version) > Number.parseFloat(deploymentTarget))) {
+        log(`✗ ${name}-${target} 的最低系统版本超过 ${deploymentTarget}：${minVersions.join(', ')}`);
+        process.exit(1);
+      }
     }
-    log('macOS sidecar 编译完成并通过许可证核验。');
+    await prepareMacLicenseBundle(buildDir, vpxSource);
+    log('macOS sidecar 编译完成并通过许可证、动态依赖和最低系统版本核验。');
     process.exit(0);
   }
 
   // ---- 下载并解压 ----
-  const { execSync } = await import('node:child_process');
   const tmp = join(repo, '.sidecar-tmp');
   await mkdir(tmp, { recursive: true });
   const archive = join(tmp, 'ffmpeg-download');
@@ -203,18 +259,22 @@ async function main() {
   }
   const url = asset.browser_download_url;
   log(`下载 ${url}（发布 ${rel.tag_name}）`);
-  execSync(`curl -fL --retry 3 -o "${archive}" "${url}"`, { stdio: 'inherit' });
+  execFileSync('curl', ['-fL', '--retry', '3', '-o', archive, url], { stdio: 'inherit' });
 
   const hash = await sha256(archive);
-  log(`sha256: ${hash}`);
+  if (asset.digest !== `sha256:${hash}`) {
+    throw new Error(`FFmpeg 下载校验失败：${asset.name}`);
+  }
+  log(`✓ sha256: ${hash}`);
   await writeFile(join(sidecarDir, 'SHA256SUMS'), `${hash}  ffmpeg-download\n`);
 
   log('解压…');
-  if (src.kind === 'zip') {
-    execSync(`unzip -qo "${archive}" -d "${tmp}/extract"`, { stdio: 'inherit' });
+  const extractDir = join(tmp, asset.name);
+  await mkdir(extractDir, { recursive: true });
+  if (src.kind === 'zip' && process.platform !== 'win32') {
+    execFileSync('unzip', ['-qo', archive, '-d', extractDir], { stdio: 'inherit' });
   } else {
-    await mkdir(join(tmp, 'extract'), { recursive: true });
-    execSync(`tar -xJf "${archive}" -C "${tmp}/extract"`, { stdio: 'inherit' });
+    execFileSync('tar', ['-xf', archive, '-C', extractDir], { stdio: 'inherit' });
   }
 
   // BtbN 的包结构是 ffmpeg-n7.1-latest-*/bin/{ffmpeg,ffprobe}.exe
@@ -236,7 +296,7 @@ async function main() {
   }
 
   for (const name of ['ffmpeg', 'ffprobe']) {
-    const p = findBinary(join(tmp, 'extract'), name);
+    const p = findBinary(extractDir, name);
     if (!p) {
       log(`✗ 解压包里找不到 ${name}`);
       process.exit(1);
@@ -244,29 +304,18 @@ async function main() {
     found[name] = p;
     // Tauri externalBin 硬规则：Windows 必须带 .exe，否则 build script 找不到资源。
     const dest = join(sidecarDir, `${name}-${target}${exeSuffix}`);
-    execSync(`cp "${p}" "${dest}"`, { stdio: 'inherit' });
+    await copyFile(p, dest);
     await chmod(dest, 0o755);
     log(`✓ ${dest}`);
   }
-
-  // 动态链接库：BtbN 的 shared 构建需要一起分发
-  const libDirs = ['bin', 'lib'];
-  for (const ld of libDirs) {
-    const dir = findBinary(join(tmp, 'extract'), '') ?? join(tmp, 'extract');
-    void dir;
-    void ld;
-  }
-  log('');
-  log('提示：shared 构建还需要把 bin/*.dll（Windows）或 lib/*.dylib、*.so（macOS/Linux）');
-  log('      一并放进 src-tauri/sidecar/，并在 tauri.sidecar.conf.json 的 resources 里声明。');
-  log('      静态构建（-lgpl，非 shared）可以省掉这一步，但体积大 20–30 MB。');
 
   // ---- 许可证核验（不信任文件名）----
   log('');
   log('核验 configure 行：');
   for (const name of ['ffmpeg', 'ffprobe']) {
     const bin = join(sidecarDir, `${name}-${target}${exeSuffix}`);
-    if (target !== 'aarch64-apple-darwin' && !target.includes('darwin') && !target.includes('linux')) {
+    const expectedPlatform = target.includes('windows') ? 'win32' : 'linux';
+    if (process.platform !== expectedPlatform || process.arch !== 'x64') {
       log(`  ${name}: 跨平台二进制无法在本机执行，跳过（CI 的对应 runner 上会核验）`);
       continue;
     }
@@ -279,6 +328,11 @@ async function main() {
   }
 
   log('');
+  const licenseDir = join(sidecarDir, 'THIRD_PARTY_LICENSES');
+  await mkdir(licenseDir, { recursive: true });
+  await copyFile(join(repo, 'THIRD_PARTY_NOTICES.md'), join(licenseDir, 'THIRD_PARTY_NOTICES.md'));
+  await copyFile(join(found.ffmpeg, '..', '..', 'LICENSE.txt'), join(licenseDir, 'FFmpeg-BtbN-LICENSE.txt'));
+  await writeFile(join(licenseDir, 'FFmpeg-BtbN-source.txt'), `${url}\nhttps://github.com/BtbN/FFmpeg-Builds\n`);
   log('完成。构建带视频能力的安装包：');
   log(`  cargo tauri build --target ${target} --config src-tauri/tauri.sidecar.conf.json`);
 }

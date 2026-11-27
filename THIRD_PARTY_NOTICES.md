@@ -6,7 +6,7 @@
 
 > **一句话总结许可证风险**：
 > - **Web 站点默认不含任何 GPL 组件**（可选降级的 ffmpeg.wasm 需用户点击才下载，且声明常驻）。
-> - **桌面版**捆绑的 FFmpeg 使用 **LGPL-2.1-or-later** 构建（不含 libx264/x265）；LibreOffice 为 **MPL-2.0**；pdfium（若启用）为 BSD-3。
+> - **桌面版**捆绑 FFmpeg（macOS 为 LGPL-2.1-or-later，Windows/Linux 的 BtbN 构建启用 LGPL-3.0，不含 libx264/x265）。可选 LibreOffice 为 MPL-2.0，pdfium（若启用）为 BSD-3。
 > - 带 `--enable-nonfree` 或 `libfdk_aac` 的 FFmpeg 构建**一律禁用**（不可再分发）。
 
 ---
@@ -94,11 +94,11 @@ pdf.js 的 10 个标准字体（Foxit*.pfb，来自 pdf.js 发行包）随构建
 | 项目 | 内容 |
 |---|---|
 | 用途 | 视频转码、抽音频、封面帧、GIF、ffprobe 元数据 |
-| 构建来源 | Windows/Linux：BtbN/FFmpeg-Builds 的 **`-lgpl-shared`** 变体；macOS：构建机本地编译（`--disable-gpl`，仅启用 VideoToolbox 等系统组件与 BSD 系编码器） |
-| 许可证 | **LGPL-2.1-or-later**（构建时未启用 `--enable-gpl` 与 `--enable-nonfree`） |
+| 构建来源 | Windows/Linux：BtbN/FFmpeg-Builds 的静态 **`-lgpl`** 变体；macOS：FFmpeg n7.1 与 libvpx v1.17.0 源码静态编译（`--disable-gpl`，启用 VideoToolbox 等系统组件与 libvpx VP9） |
+| 许可证 | macOS：**LGPL-2.1-or-later**；Windows/Linux 的 BtbN LGPL 构建：**LGPL-3.0**（`--enable-version3`）。均未启用 `--enable-gpl` 或 `--enable-nonfree` |
 | 源码获取 | https://git.ffmpeg.org/ffmpeg.git （tag 见 `src-tauri/sidecar/SHA256SUMS` 同目录的版本记录） |
 | 构建脚本 | https://github.com/BtbN/FFmpeg-Builds （Windows/Linux）；macOS 的 `configure` 命令行记录在 `scripts/fetch-sidecars.mjs` 的输出里 |
-| 合规要点 | ① 动态链接（shared）便于用户替换库；② 安装包内附本文件与 LGPL 全文；③ 提供源码获取地址；④ **不得**把该构建宣称为 MIT |
+| 合规要点 | macOS 当前采用静态链接（`--enable-static --disable-shared`），Windows/Linux 的 BtbN 包是静态 LGPL 发行版；对应许可证文本和上游源码/发行链接随安装包提供。不得把这些构建宣称为 MIT。静态链接的再分发义务依 LGPL 版本和实际打包方式判断，应随发布版本一并复核。 |
 
 > ### 什么时候 FFmpeg 会变成 GPL？
 >
@@ -120,19 +120,9 @@ pdf.js 的 10 个标准字体（Foxit*.pfb，来自 pdf.js 发行包）随构建
 （macOS VideoToolbox / Windows NVENC·QSV·AMF / Linux VAAPI），软件编码用 VP9（libvpx，BSD）
 与 AV1（SVT-AV1，BSD-2 / libaom，BSD-2）。
 
-### 捆绑的 LibreOffice（headless）
+### 可选的 LibreOffice（headless）
 
-| 项目 | 内容 |
-|---|---|
-| 用途 | Word→PDF / PDF→Word 的原生转换（优先于结构化兜底）。保真度显著高于结构化路径，但**不承诺无损** |
-| 版本 | 26.x（随发布固定） |
-| 许可证 | **MPL-2.0**（主体），另含若干其他开源组件 |
-| 源码获取 | https://www.libreoffice.org/about-us/source-code/ |
-| 许可证全文 | https://www.libreoffice.org/about-us/licenses/ |
-| 合规要点 | ① MPL 是**文件级** copyleft：我们未修改其源码，因此无源码公开义务；② 但**必须保留其许可证与版权声明**，安装包内附 `sidecar/THIRD_PARTY_LICENSES`；③ 提供源码获取方式（上述链接）；④ 不得移除其 NOTICE |
-
-> MPL-2.0 与 GPL 的关键区别：MPL 允许与专有代码组合分发，只要求「被修改的 MPL 文件」保持 MPL。
-> 我们不修改 LibreOffice，所以只需保留声明。
+如用户自行安装 LibreOffice，桌面版会优先使用其进行 Word→PDF / PDF→Word 原生转换；否则回退到结构化转换。保真度更高但不承诺无损。LibreOffice 不包含在当前安装包内。其代码与许可证信息见 [LibreOffice 官网](https://www.libreoffice.org/about-us/source-code/) 和 [许可证页](https://www.libreoffice.org/about-us/licenses/)；本项目不分发该软件。
 
 ### pdfium（可选，Phase 5 决定是否启用）
 

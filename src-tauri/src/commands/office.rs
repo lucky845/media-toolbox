@@ -12,6 +12,17 @@ use serde::Serialize;
 
 use crate::sidecar;
 
+/// Open the official download page in the system browser on user request.
+#[tauri::command]
+#[allow(deprecated)] // Reuse the bundled shell plugin for this fixed URL.
+pub fn open_libreoffice_download(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+
+    app.shell()
+        .open("https://www.libreoffice.org/download/", None)
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeConvertResult {
