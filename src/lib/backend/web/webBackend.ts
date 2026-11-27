@@ -326,7 +326,7 @@ export class WebBackend implements Backend_ {
       kind: 'web',
       contractVersion: 1,
       image: {
-        formats: ['jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'],
+        formats: ['jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'qoi', 'ico'],
         avif: false,
         maxPixels: 20_000_000,
         parallel: 1,

@@ -18,6 +18,8 @@ import { PreviewCompare } from './PreviewCompare';
 import {
   buildParams,
   canvasError,
+  colorPresetAdjust,
+  compressionPresetQuality,
   defaultForm,
   describeParams,
   needsBackgroundNotice,
@@ -25,7 +27,7 @@ import {
   type ImageFormState,
 } from './form';
 
-const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff';
+const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.qoi,.ico';
 
 export function ImagePage({ section }: { section?: string }) {
   const current = normalizeImageSection(section);
@@ -38,12 +40,23 @@ export function ImagePage({ section }: { section?: string }) {
   const outputId = useId();
   const { caps, limits, status } = useCapabilities();
   const settings = useSettings();
+  const availableFormats = caps?.image.formats ?? [];
+  const encode = settings.encodeOptions();
+  if (availableFormats[0] && !availableFormats.includes(encode.format)) {
+    encode.format = availableFormats[0];
+  }
 
   const [selected, setSelected] = useState<InputRef | null>(null);
+  const [batch, setBatch] = useState<InputRef[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const probeGeneration = useRef(0);
   const [meta, setMeta] = useState<ImageMeta | null>(null);
   const [probeError, setProbeError] = useState<ToolError | null>(null);
   const [limitBlocked, setLimitBlocked] = useState<string | null>(null);
   const [form, setForm] = useState<ImageFormState>(() => defaultForm(settings.filter));
+  const [preset, setPreset] = useState<'custom' | 'compact' | 'balanced' | 'quality'>('custom');
+  const [colorPreset, setColorPreset] = useState<'original' | 'grayscale' | 'soft' | 'vivid' | 'custom'>('original');
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewRef = useRef<string | null>(null);
@@ -52,14 +65,9 @@ export function ImagePage({ section }: { section?: string }) {
 
   // 单值选择器（避免 store 整体变化触发无限重渲染）
   const items = useQueue((s) => s.items);
-  const setConcurrency = useQueue((s) => s.setConcurrency);
   const enqueue = useQueue((s) => s.enqueue);
   const paused = useQueue((s) => s.paused);
   const invalidCanvas = showFill ? canvasError(form, limits?.maxPixels) : null;
-
-  useEffect(() => {
-    if (limits) setConcurrency(Math.min(limits.maxConcurrent, 2));
-  }, [limits, setConcurrency]);
 
   // 设置里的滤波变化时同步到表单
   useEffect(() => {
@@ -76,6 +84,7 @@ export function ImagePage({ section }: { section?: string }) {
 
   const probe = useCallback(
     async (ref: InputRef) => {
+      const generation = ++probeGeneration.current;
       setProbeError(null);
       setLimitBlocked(null);
       setMeta(null);
@@ -83,6 +92,7 @@ export function ImagePage({ section }: { section?: string }) {
         const backend = await getBackend();
         if (!backend.probe) return;
         const m = (await backend.probe(ref)) as ImageMeta;
+        if (generation !== probeGeneration.current) return;
         setMeta(m);
         if (limits) {
           if (m.width * m.height > limits.maxPixels) {
@@ -96,7 +106,7 @@ export function ImagePage({ section }: { section?: string }) {
           }
         }
       } catch (e) {
-        setProbeError(e as ToolError);
+        if (generation === probeGeneration.current) setProbeError(e as ToolError);
       }
     },
     [limits],
@@ -106,32 +116,17 @@ export function ImagePage({ section }: { section?: string }) {
     async (refs: InputRef[]) => {
       if (refs.length === 0) return;
       const first = refs[0]!;
-      if (first.file) {
-        if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-        const url = URL.createObjectURL(first.file);
-        previewRef.current = url;
-        setPreviewUrl(url);
-      }
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+      previewRef.current = first.file && !/\.qoi$/i.test(first.name) ? URL.createObjectURL(first.file) : null;
+      setPreviewUrl(previewRef.current);
+      if (resultRef.current) URL.revokeObjectURL(resultRef.current);
+      resultRef.current = null;
       setSelected(first);
+      setBatch(refs);
       setResult(null);
       await probe(first);
-      if (refs.length > 1 && !invalidCanvas) {
-        const backend = await getBackend();
-        const encode = settings.encodeOptions();
-        for (const ref of refs) {
-          let refMeta: ImageMeta | null = null;
-          if (showTransform && (form.cropEnabled || form.scalePercent !== 100)) {
-            try {
-              refMeta = (await backend.probe?.(ref) as ImageMeta | undefined) ?? null;
-            } catch {
-              // The queue reports the backend error for this individual file.
-            }
-          }
-          enqueue(ref, buildParams(form, refMeta, current), encode);
-        }
-      }
     },
-    [probe, form, settings, enqueue, current, invalidCanvas, showTransform],
+    [probe],
   );
 
   const handleFiles = useCallback(
@@ -146,18 +141,53 @@ export function ImagePage({ section }: { section?: string }) {
     await adoptFiles(await backend.pickFiles(ACCEPT, true));
   }, [adoptFiles]);
 
-  const runSingle = useCallback(() => {
-    if (!selected || limitBlocked || invalidCanvas || status !== 'ready') return;
-    enqueue(selected, buildParams(form, meta, current), settings.encodeOptions());
-  }, [selected, form, meta, current, settings, enqueue, limitBlocked, invalidCanvas, status]);
+  const applyColorPreset = useCallback((next: typeof colorPreset) => {
+    setColorPreset(next);
+    if (next === 'custom') return;
+    const adjust = colorPresetAdjust(next);
+    setForm((f) => ({ ...f, adjust: adjust ?? { brightness: 1, contrast: 1, saturation: 1 } }));
+  }, []);
+
+  const exceedsBatchLimit = !!limits && limits.maxBatch > 0 && batch.length > limits.maxBatch;
+  const canSubmit = status === 'ready' && availableFormats.length > 0 && !invalidCanvas && !exceedsBatchLimit;
+
+  async function runBatch() {
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const backend = await getBackend();
+      const prepared = [];
+      for (const ref of batch) {
+        let refMeta = ref === selected ? meta : null;
+        if (!refMeta && backend.probe) {
+          try {
+            refMeta = (await backend.probe(ref)) as ImageMeta;
+          } catch {
+            // The queue records this file’s processing error independently.
+          }
+        }
+        prepared.push({ ref, params: buildParams(form, refMeta, current) });
+      }
+      for (const { ref, params } of prepared) enqueue(ref, params, encode);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }
+
+  function runSingle() {
+    if (!selected || !meta || limitBlocked || !canSubmit) return;
+    enqueue(selected, buildParams(form, meta, current), encode);
+  }
 
   // 取最新成功结果用于对比预览
   useEffect(() => {
     const latest = [...items].reverse().find((i) => i.status === 'succeeded' && i.task.kind === 'image.process' && i.task.input === selected)?.result;
-    if (latest?.bytes.length) {
+    if (latest?.bytes.length && latest.meta.outFormat !== 'qoi') {
       if (resultRef.current) URL.revokeObjectURL(resultRef.current);
       const blob = new Blob([latest.bytes.slice().buffer as ArrayBuffer], {
-        type: `image/${latest.meta.outFormat}`,
+        type: latest.meta.outFormat === 'ico' ? 'image/x-icon' : `image/${latest.meta.outFormat}`,
       });
       const url = URL.createObjectURL(blob);
       resultRef.current = url;
@@ -165,7 +195,6 @@ export function ImagePage({ section }: { section?: string }) {
     }
   }, [items, selected]);
 
-  const encode = settings.encodeOptions();
   const params = buildParams(form, meta, current);
   const active = items.filter((i) => i.task.kind === 'image.process' && (i.status === 'running' || i.status === 'queued'));
   const finished = items.filter(
@@ -176,6 +205,8 @@ export function ImagePage({ section }: { section?: string }) {
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>导入</h2>
+        {batch.length > 1 && <p className="hint" role="status">已选 {batch.length} 张图片；调整下方参数后可统一批量处理。</p>}
+        {exceedsBatchLimit && <p role="alert">单批最多处理 {limits?.maxBatch} 张图片，请分批导入。</p>}
         <DropZone accept={ACCEPT} onFiles={handleFiles}
           onNativeFiles={caps?.fileSystem.nativeFilePicker ? adoptFiles : undefined} onPick={handlePick} />
       </div>
@@ -192,6 +223,7 @@ export function ImagePage({ section }: { section?: string }) {
             <h2>源文件</h2>
             <PreviewCompare before={previewUrl} after={result?.url ?? null} />
             <p className="source-filename">{selected.name}</p>
+            {(meta?.format === 'qoi' || encode.format === 'qoi') && <p className="hint">此处无法预览 QOI，处理后的文件可在任务列表下载。</p>}
             {meta && (
               <dl className="source-details">
                 <div>
@@ -242,7 +274,8 @@ export function ImagePage({ section }: { section?: string }) {
         aria-labelledby={outputId}
         onSubmit={(event) => {
           event.preventDefault();
-          runSingle();
+          if (batch.length > 1) void runBatch();
+          else runSingle();
         }}
       >
         <p className="hint">
@@ -365,6 +398,26 @@ export function ImagePage({ section }: { section?: string }) {
         {showCompress && (
           <fieldset className="card" style={{ minInlineSize: 0 }}>
             <legend>压缩</legend>
+            <div className="row" style={{ gap: 12, marginBottom: 12 }}>
+              <label className="col" style={{ gap: 4 }}>
+                <span className="hint">预设</span>
+                <select
+                  value={encode.format === 'jpeg' ? preset : 'custom'}
+                  disabled={encode.format !== 'jpeg'}
+                  onChange={(e) => {
+                    const next = e.target.value as typeof preset;
+                    setPreset(next);
+                    if (next !== 'custom') settings.setQuality(compressionPresetQuality[next]);
+                  }}
+                >
+                  <option value="custom">自定义</option>
+                  <option value="compact">体积优先</option>
+                  <option value="balanced">均衡</option>
+                  <option value="quality">质量优先</option>
+                </select>
+              </label>
+              <span className="hint" style={{ alignSelf: 'end' }}>预设适用于 JPEG。</span>
+            </div>
             <div className="row">
               <label className="col grow" style={{ gap: 4 }}>
                 <span className="hint">
@@ -376,11 +429,14 @@ export function ImagePage({ section }: { section?: string }) {
                   min={10}
                   max={100}
                   value={settings.quality}
-                  onChange={(e) => settings.setQuality(Number(e.target.value))}
+                  onChange={(e) => {
+                    setPreset('custom');
+                    settings.setQuality(Number(e.target.value));
+                  }}
                 />
               </label>
             </div>
-            <p className="hint">质量滑块适用于 JPEG。在输出中选择格式以比较处理后的大小。</p>
+            <p className="hint">JPEG 质量可调；WebP 编码器为无损模式。在输出中比较格式和体积。</p>
           </fieldset>
         )}
         {showFill && (
@@ -441,6 +497,18 @@ export function ImagePage({ section }: { section?: string }) {
         {showColor && (
           <fieldset className="card" style={{ minInlineSize: 0 }}>
             <legend>色彩</legend>
+            <div className="row" style={{ gap: 12, marginBottom: 12 }}>
+              <label className="col" style={{ gap: 4 }}>
+                <span className="hint">滤镜预设</span>
+                <select value={colorPreset} onChange={(e) => applyColorPreset(e.target.value as typeof colorPreset)}>
+                  <option value="original">原始</option>
+                  <option value="grayscale">黑白</option>
+                  <option value="soft">柔和</option>
+                  <option value="vivid">鲜明</option>
+                  <option value="custom" disabled>自定义</option>
+                </select>
+              </label>
+            </div>
             <div className="row" style={{ gap: 18 }}>
               {(
                 [
@@ -459,12 +527,13 @@ export function ImagePage({ section }: { section?: string }) {
                     max={4}
                     step={0.05}
                     value={form.adjust[key]}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      setColorPreset('custom');
                       setForm((f) => ({
                         ...f,
                         adjust: { ...f.adjust, [key]: Number(e.target.value) },
-                      }))
-                    }
+                      }));
+                    }}
                   />
                 </label>
               ))}
@@ -473,9 +542,7 @@ export function ImagePage({ section }: { section?: string }) {
               <button
                 type="button"
                 className="ghost"
-                onClick={() =>
-                  setForm((f) => ({ ...f, adjust: { brightness: 1, contrast: 1, saturation: 1 } }))
-                }
+                onClick={() => applyColorPreset('original')}
               >
                 重置色彩
               </button>
@@ -491,10 +558,13 @@ export function ImagePage({ section }: { section?: string }) {
               <span className="hint" id="image-format-label">格式</span>
               <select
                 aria-labelledby="image-format-label"
-                value={settings.format}
-                onChange={(e) => settings.setFormat(e.target.value as EncodeOptions['format'])}
+                value={encode.format}
+                onChange={(e) => {
+                  setPreset('custom');
+                  settings.setFormat(e.target.value as EncodeOptions['format']);
+                }}
               >
-                {['jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'].map((f) => (
+                {availableFormats.map((f) => (
                   <option key={f} value={f}>
                     {f.toUpperCase()}
                   </option>
@@ -512,6 +582,7 @@ export function ImagePage({ section }: { section?: string }) {
             </label>
           </div>
 
+          {encode.format === 'ico' && <p className="hint">ICO 输出宽和高均不能超过 256 像素，可先在变换中缩放。</p>}
           {needsBackgroundNotice(meta, encode, params.canvas) && (
             <div style={{ marginTop: 12 }}>
               <LimitNotice kind="fidelity" title="透明图将转为不透明">
@@ -549,10 +620,11 @@ export function ImagePage({ section }: { section?: string }) {
           <div className="row" style={{ marginTop: 16 }}>
             <button
               className="primary"
-              type="submit"
-              disabled={!selected || !!limitBlocked || !!invalidCanvas || status !== 'ready'}
+              type="button"
+              disabled={!selected || !canSubmit || submitting || (batch.length <= 1 && (!meta || !!limitBlocked))}
+              onClick={() => void (batch.length > 1 ? runBatch() : runSingle())}
             >
-              开始处理
+              {submitting ? '正在准备批量任务…' : batch.length > 1 ? `批量处理 ${batch.length} 张` : '开始处理'}
             </button>
             <span className="hint mono">{describeParams(params)}</span>
           </div>

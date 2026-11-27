@@ -76,6 +76,8 @@ pub fn sniff_format(data: &[u8]) -> Option<ImageFormat> {
         b"\xFF\xD8\xFF\xE0" | b"\xFF\xD8\xFF\xE1" | b"\xFF\xD8\xFF\xDB" | b"\xFF\xD8\xFF\xEE" => {
             Some(ImageFormat::Jpeg)
         }
+        b"qoif" => Some(ImageFormat::Qoi),
+        b"\x00\x00\x01\x00" => Some(ImageFormat::Ico),
         _ if data.starts_with(b"\x89PNG\r\n\x1A\n") => Some(ImageFormat::Png),
         _ if data.starts_with(b"GIF8") => Some(ImageFormat::Gif),
         _ if data.starts_with(b"BM") => Some(ImageFormat::Bmp),
@@ -238,5 +240,42 @@ mod tests {
         let img = RasterImage::transparent(4, 4).unwrap();
         assert_eq!(img.data.len(), 64);
         assert!(!img.is_opaque());
+    }
+
+    #[test]
+    fn qoi_and_ico_roundtrip_preserve_pixels_and_probe() {
+        let src = RasterImage::new(
+            2,
+            2,
+            vec![1, 2, 3, 255, 1, 2, 3, 255, 9, 8, 7, 128, 0, 0, 0, 0],
+        )
+        .unwrap();
+        for format in [ImageFormat::Qoi, ImageFormat::Ico] {
+            let bytes = crate::image::encode(
+                &src,
+                &crate::image::EncodeOptions {
+                    format,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let meta = probe(&bytes).unwrap();
+            assert_eq!((meta.format, meta.width, meta.height), (format, 2, 2));
+            assert_eq!(decode_rgba(&bytes).unwrap(), src);
+        }
+    }
+
+    #[test]
+    fn ico_rejects_dimensions_above_256() {
+        let src = RasterImage::transparent(257, 1).unwrap();
+        let err = crate::image::encode(
+            &src,
+            &crate::image::EncodeOptions {
+                format: ImageFormat::Ico,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidParams);
     }
 }

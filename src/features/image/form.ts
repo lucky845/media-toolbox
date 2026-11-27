@@ -31,6 +31,19 @@ export interface ImageFormState {
 }
 
 export type ImageSection = 'transform' | 'compress' | 'fill' | 'color' | 'all';
+export type CompressionPreset = 'custom' | 'compact' | 'balanced' | 'quality';
+export type ColorPreset = 'original' | 'grayscale' | 'soft' | 'vivid';
+
+export const compressionPresetQuality = { compact: 68, balanced: 82, quality: 94 } as const;
+
+export function colorPresetAdjust(preset: ColorPreset): Adjust | null {
+  switch (preset) {
+    case 'grayscale': return { brightness: 1, contrast: 1, saturation: 0 };
+    case 'soft': return { brightness: 1.04, contrast: 0.92, saturation: 0.82 };
+    case 'vivid': return { brightness: 1, contrast: 1.12, saturation: 1.35 };
+    default: return null;
+  }
+}
 
 export function normalizeImageSection(section?: string): ImageSection {
   switch (section) {

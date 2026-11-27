@@ -14,7 +14,7 @@
 浏览器内完成图片、PDF、视频、文档处理。**文件不离开本机** —— 全部计算在你的设备上完成，无后端、无上传、无账号、无遥测。
 
 **🔗 在线使用**：[media-toolbox.lucky845.top](https://media-toolbox.lucky845.top/)
-**💾 桌面版（离线全量）**：[GitHub Releases](https://github.com/lucky845/media-toolbox/releases/latest) · 当前 `v0.1.0` 提供 Windows / macOS arm64 / Linux 三平台安装包
+**💾 桌面版（离线全量）**：[GitHub Releases](https://github.com/lucky845/media-toolbox/releases/latest) · Windows / macOS arm64 / Linux 三平台安装包
 
 同一份 Rust 核心算法编译成两个目标，套两个壳：
 
@@ -41,7 +41,7 @@
 
 ## ✨ 特性
 
-- **🖼️ 图片全链路** —— 压缩 / 裁剪 / 旋转 / 翻转 / 亮度对比度饱和度 / 缩放 / EXIF 方向；jpeg / png / webp / gif / bmp / tiff
+- **🖼️ 图片全链路** —— 批量压缩 / 裁剪 / 旋转 / 翻转 / 亮度对比度饱和度 / 滤镜 / 缩放 / EXIF 方向；JPEG / PNG / WebP / GIF / BMP / TIFF / QOI / ICO
 - **📄 PDF** —— 按页渲染（虚拟化 + 长图）、合并 / 拆分 / 旋转 / 提取文本与图片
 - **🎬 视频** —— WebCodecs 轻量转码（MP4/H.264 → MP4/WebM）；桌面版 FFmpeg sidecar 全格式 + 硬件编码
 - **📝 文档** —— Word↔PDF 结构化转换；桌面版 LibreOffice headless 高保真优先
@@ -58,11 +58,9 @@
 
 | 源文件 | 形态 | 说明 |
 |---|---|---|
-| [Windows x64 MSI](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-win-x64.msi) | `.msi` | 110 MB |
-| [macOS arm64 dmg](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-macos-arm64.dmg) | `.dmg` | 22 MB |
-| [macOS arm64 app](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-macos-arm64.app.tar.gz) | `.app.tar.gz` | 22 MB |
-| [Linux x64 deb](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-linux-x64.deb) | `.deb` | 120 MB |
-| [Linux x64 AppImage](https://github.com/lucky845/media-toolbox/releases/download/v0.1.0/MediaToolbox-0.1.0-linux-x64.AppImage) | `.AppImage` | 183 MB |
+| Windows x64 MSI | `.msi` | [最新版本](https://github.com/lucky845/media-toolbox/releases/latest) |
+| macOS arm64 DMG / app archive | `.dmg` / `.app.tar.gz` | [最新版本](https://github.com/lucky845/media-toolbox/releases/latest) |
+| Linux x64 deb / AppImage | `.deb` / `.AppImage` | [最新版本](https://github.com/lucky845/media-toolbox/releases/latest) |
 
 > [!WARNING]
 > macOS 安装包适用于 Apple 芯片，当前公开版本未经 Apple 公证。双击 DMG 后，将应用拖到「应用程序」，再从那里启动。若 Gatekeeper 阻止启动，先尝试一次，再到「系统设置 → 隐私与安全性」查看是否提供「仍要打开」。该按钮仅适用于可覆盖的未识别开发者/未公证提示；如果 DMG 校验或挂载失败、系统报告已损坏，或按钮不存在，不要绕过安全检查，请从 GitHub Releases 重新下载，或将错误原文和 macOS 版本发给维护者。
@@ -103,8 +101,8 @@ npm run preview                              # 推荐：Vite 会给 .wasm 正确
 
 | 能力 | 在线版 | 桌面版 | 在线版为什么是这样 |
 |---|---|---|---|
-| 图片 压缩/裁剪/旋转/翻转/亮度对比度饱和度/缩放/EXIF 方向 | ✅ ≤20 MP、≤20 MB | ✅ 大图、批量、rayon 并行 | 单线程 wasm + Worker；桌面端 rayon |
-| 图片 格式转换 | ✅ jpeg/png/webp/gif/bmp/tiff | ✅ 加 AVIF | AVIF 编码库（ravif）约 +1.5–2 MB，Web 默认关闭 |
+| 图片 压缩/裁剪/旋转/翻转/亮度对比度饱和度/缩放/EXIF 方向 | ✅ ≤20 MP、≤20 MB、每批 ≤50 张 | ✅ 软件不设像素与批量数量上限 | 单线程 wasm + Worker；桌面端 rayon |
+| 图片 格式转换 | ✅ JPEG/PNG/WebP/GIF/BMP/TIFF/QOI/ICO | ✅ 同在线版 | ICO 输出每边最多 256 像素；AVIF 编码未启用 |
 | 视频 压缩/格式转换 | ⚠️ 仅轻量 MP4(H.264)→MP4/WebM，≤200 MB、≤5 分钟 | ✅ FFmpeg sidecar（档位 L：无 libx264，H.264 走系统硬件编码） | 无 COOP/COEP → 单线程；编解码器由浏览器决定 |
 | 视频 元数据/首帧 | ✅ mp4box 轻量解析 | ✅ ffprobe | — |
 | PDF → 图片 | ✅ ≤100 页、≤200 DPI | ✅ 不限页数、≤400 DPI（复用 pdf.js） | pdf.js 按页渲染 + 虚拟化；阈值由 capabilities 注入 |
@@ -141,7 +139,7 @@ npm run preview                              # 推荐：Vite 会给 .wasm 正确
 
 | 产物 | 原始 | gzip | brotli |
 |---|---|---|---|
-| `core_image.wasm` | 1254 KB | 390 KB | 307 KB |
+| `core_image.wasm` | 1208 KB | 419 KB | 326 KB |
 | `core_doc.wasm` | 1981 KB | 687 KB | 531 KB |
 | `pdf.js`（main + worker） | 1748 KB | 516 KB | 424 KB |
 | `mammoth`（动态 import） | 298 KB | 87 KB | 74 KB |
@@ -155,7 +153,7 @@ npm run preview                              # 推荐：Vite 会给 .wasm 正确
 | 访客画像 | 单次流量 |
 |---|---|
 | 只逛首页 | ~0.12 MB |
-| 用一次图片压缩 | ~1.17 MB |
+| 用一次图片压缩 | 依实际缓存资源计算 |
 | 图片 + PDF + 文档（重度） | ~2.43 MB |
 | 用了可选 ffmpeg.wasm 降级 | ~12.1 MB |
 

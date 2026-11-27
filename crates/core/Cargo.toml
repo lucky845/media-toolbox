@@ -21,7 +21,7 @@ features = ["std"]
 [dependencies.image]
 version = "0.25"
 default-features = false
-features = ["jpeg", "png", "gif", "bmp", "tiff", "webp"]
+features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "ico", "qoi"]
 
 [dependencies.kamadak-exif]
 version = "0.6"

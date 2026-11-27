@@ -98,9 +98,9 @@ function BrowserHelp({ limits }: { limits: Limits | null }) {
             </tr>
             <tr>
               <td>图片格式转换</td>
-              <td>✅ jpeg/png/webp/gif/bmp/tiff</td>
-              <td>✅ 加 AVIF</td>
-              <td>在线版 AVIF 编码默认关闭（体积预算：+1.5–2 MB）</td>
+              <td>✅ JPEG / PNG / WebP / GIF / BMP / TIFF / QOI / ICO</td>
+              <td>✅ 同在线版</td>
+              <td>ICO 输出最大 256 × 256；AVIF 暂未支持。</td>
             </tr>
             <tr>
               <td>视频压缩 / 转码</td>

@@ -2,7 +2,7 @@
 
 use media_core::common::limits_check::estimate_image_peak;
 use media_native::RayonParallel;
-use media_ports::codec::CodecProvider;
+use media_ports::codec::{CodecProvider, ImageFormat};
 use media_ports::{Limits, ToolError};
 use serde::Serialize;
 
@@ -24,7 +24,7 @@ pub struct Capabilities {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageCaps {
-    pub formats: Vec<&'static str>,
+    pub formats: Vec<ImageFormat>,
     pub avif: bool,
     /// 桌面端「不限」用 -1 表示（JS Number 安全）
     pub max_pixels: i64,
@@ -99,7 +99,7 @@ pub fn probe_capabilities() -> Result<Capabilities, ToolError> {
         kind: "desktop",
         contract_version: media_ports::CONTRACT_VERSION,
         image: ImageCaps {
-            formats: formats.image_encode.iter().map(|f| f.extension()).collect(),
+            formats: formats.image_encode,
             avif: formats.avif_enabled,
             max_pixels: -1,
             parallel,
