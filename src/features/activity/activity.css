@@ -1,0 +1,36 @@
+.activity-workspace { display: grid; gap: 18px; }
+.activity-nav { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+.activity-nav a { padding: 8px 12px; color: var(--soft); border-bottom: 2px solid transparent; }
+.activity-nav a[aria-current='page'] { color: var(--cyan); border-bottom-color: var(--cyan); text-decoration: none; }
+.activity-section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: clamp(14px, 2.5vw, 22px); }
+.activity-section h2 { margin-bottom: 14px; font-size: 1.05rem; }
+.activity-section h3 { margin: 0; color: var(--ink); font-size: .96rem; font-weight: 650; overflow-wrap: anywhere; }
+.activity-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-top: 1px solid var(--line-soft); }
+.activity-settings-row:first-of-type { border-top: 0; padding-top: 0; }
+.activity-settings-row label { color: var(--ink); font-weight: 600; }
+.activity-settings-row .hint { max-width: 38rem; margin-top: 4px; }
+.activity-settings-row select { min-width: 11rem; }
+.activity-range { display: flex; align-items: center; gap: 10px; min-width: min(18rem, 48%); }
+.activity-range input { flex: 1; }
+.activity-range span { width: 2.5rem; color: var(--cyan); font-family: var(--mono); text-align: right; }
+.activity-empty { text-align: center; padding-block: 42px; }
+.activity-history-header { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
+.activity-history-list { display: grid; gap: 8px; list-style: none; margin: 16px 0 0; padding: 0; }
+.activity-history-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.activity-history-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 5px; }
+.activity-outcome { font-size: .8rem; color: var(--soft); }
+.activity-outcome[data-outcome='succeeded'] { color: var(--ok); }
+.activity-outcome[data-outcome='failed'] { color: var(--danger); }
+.activity-dialog { width: min(28rem, calc(100% - 32px)); margin: auto; padding: 22px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.activity-dialog:modal { overscroll-behavior: contain; }
+.activity-dialog::backdrop { background: rgba(0, 0, 0, .62); overflow: hidden; overscroll-behavior: contain; }
+.activity-dialog h2 { margin-bottom: 8px; }
+.activity-dialog-actions { display: flex; justify-content: end; gap: 8px; margin-top: 22px; }
+.workspace-links { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 680px) {
+  .workspace-links { flex-wrap: wrap; justify-content: end; }
+  .activity-settings-row { align-items: start; flex-direction: column; gap: 9px; }
+  .activity-range { width: 100%; }
+  .activity-history-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .activity-history-list li > .ghost { grid-column: 1 / -1; justify-self: start; }
+}

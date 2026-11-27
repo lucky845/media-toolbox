@@ -204,6 +204,12 @@ export interface LogEntry {
   at: number;
 }
 
+export interface NativeDropPayload {
+  type: 'enter' | 'over' | 'drop' | 'leave';
+  paths?: string[];
+  position?: { x: number; y: number };
+}
+
 export interface RunOptions {
   taskId: string;
   onProgress: (p: Progress) => void;

@@ -1,283 +1,222 @@
-// 任务队列与状态机（`docs/CONTRACTS.md` §8）。两端同一份。
-
 import { create } from 'zustand';
 import { getBackend } from '../lib/backend';
+import type { EncodeOptions, ImageParams, InputRef, Progress, RunOptions, TaskPayload, TaskResult, ToolError } from '../lib/backend/types';
+import { fallbackMessage, isToolError } from '../lib/errors';
 import { recordTask } from './recent';
-import type {
-  EncodeOptions,
-  ImageParams,
-  ImageResultMeta,
-  InputRef,
-  Progress,
-  ToolError,
-} from '../lib/backend/types';
 
-export type TaskStatus =
-  | 'queued'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled'
-  | 'removed';
+export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+type Runner = (task: TaskPayload, options: RunOptions) => Promise<TaskResult>;
+type Observer = Partial<Pick<RunOptions, 'signal' | 'onProgress'>>;
 
 export interface QueueItem {
   id: string;
+  task: TaskPayload;
   status: TaskStatus;
-  input: InputRef;
-  params: ImageParams;
-  encode: EncodeOptions;
   progress: Progress | null;
-  result?: ImageResultMeta;
+  result?: TaskResult;
   outputBytes?: Uint8Array;
   outputName?: string;
   error?: ToolError;
   attempt: number;
-  createdAt: number;
-  startedAt?: number;
-  finishedAt?: number;
 }
 
 interface QueueState {
   items: QueueItem[];
-  /** 队列级暂停：不取新任务（running 的不能暂停，只能取消） */
   paused: boolean;
-  /** 同时运行的任务数上限，来自 capabilities().limits.maxConcurrent */
   concurrency: number;
-  /** 正在运行的 taskId → AbortController */
-  controllers: Map<string, AbortController>;
-
   enqueue: (input: InputRef, params: ImageParams, encode: EncodeOptions) => string;
-  enqueueMany: (refs: InputRef[], params: ImageParams, encode: EncodeOptions) => string[];
-  start: (id: string) => Promise<void>;
+  submit: (task: TaskPayload, observer?: Observer, runner?: Runner) => Promise<TaskResult>;
   cancel: (id: string) => void;
-  retry: (id: string) => Promise<void>;
+  retry: (id: string) => void;
   remove: (id: string) => void;
-  setPaused: (v: boolean) => void;
-  setConcurrency: (n: number) => void;
-  clearFinished: () => void;
-  /** 队列推进：在有槽位时自动启动下一个 queued */
-  pump: () => void;
-  runningCount: () => number;
-  totalProgress: () => number;
+  setPaused: (paused: boolean) => void;
+  setConcurrency: (concurrency: number) => void;
+  clearFinished: (kind?: TaskPayload['kind']) => void;
 }
 
-let counter = 0;
-function nextId(): string {
-  counter += 1;
-  return `t-${Date.now().toString(36)}-${counter}`;
+interface Job {
+  runner?: Runner;
+  observer?: Observer;
+  resolve?: (result: TaskResult) => void;
+  reject?: (error: ToolError) => void;
+  detach?: () => void;
+  controller?: AbortController;
 }
 
-export const useQueue = create<QueueState>((set, get) => ({
-  items: [],
-  paused: false,
-  concurrency: 1,
-  controllers: new Map(),
+export const TASK_LABELS: Record<TaskPayload['kind'], string> = {
+  'image.process': '图片处理',
+  'video.transcode': '视频转码',
+  'pdf.render': 'PDF 渲染图片',
+  'pdf.merge': 'PDF 合并',
+  'pdf.split': 'PDF 拆分',
+  'pdf.rotate': 'PDF 旋转',
+  'pdf.extract': 'PDF 提取',
+  'office.structure': '文档结构化转换',
+  'office.convert': '文档转换',
+};
 
-  enqueue: (input, params, encode) => {
-    const id = nextId();
-    const item: QueueItem = {
-      id,
-      status: 'queued',
-      input,
-      params,
-      encode,
-      progress: null,
-      attempt: 0,
-      createdAt: Date.now(),
-    };
-    set((s) => ({ items: [...s.items, item] }));
-    get().pump();
-    return id;
-  },
+export function taskInputs(task: TaskPayload): InputRef[] {
+  return task.kind === 'pdf.merge' ? task.inputs : [task.input];
+}
 
-  enqueueMany: (refs, params, encode) => {
-    const ids = refs.map((input) => {
-      const id = nextId();
-      const item: QueueItem = {
-        id,
-        status: 'queued',
-        input,
-        params,
-        encode,
-        progress: null,
-        attempt: 0,
-        createdAt: Date.now(),
-      };
-      set((s) => ({ items: [...s.items, item] }));
-      return id;
+export function isActive(item: QueueItem): boolean {
+  return item.status === 'queued' || item.status === 'running';
+}
+
+const cancelled: ToolError = { code: 'CANCELLED', message: '任务已取消', retryable: true, desktopHint: false };
+
+function storedConcurrency(): number {
+  try {
+    const value = Number(localStorage.getItem('media-toolbox-queue-concurrency'));
+    return value === 2 ? 2 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+export const useQueue = create<QueueState>((set, get) => {
+  const jobs = new Map<string, Job>();
+  let counter = 0;
+  const session = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+
+  function update(id: string, changes: Partial<QueueItem>) {
+    set((state) => ({ items: state.items.map((item) => item.id === id ? { ...item, ...changes } : item) }));
+  }
+
+  function finish(item: QueueItem, outcome: 'succeeded' | 'failed' | 'cancelled', result?: TaskResult, error?: ToolError) {
+    const job = jobs.get(item.id);
+    if (!job) return;
+    // Release the slot and detach page callbacks before publishing the terminal state.
+    job.detach?.();
+    if (outcome === 'succeeded') jobs.delete(item.id);
+    else jobs.set(item.id, { runner: job.runner });
+    update(item.id, {
+      status: outcome,
+      result,
+      outputBytes: result?.bytes,
+      outputName: result?.outputName,
+      error: outcome === 'failed' ? error : undefined,
     });
-    get().pump();
-    return ids;
-  },
+    void recordTask({
+      id: item.id,
+      createdAt: Date.now(),
+      kind: item.task.kind,
+      fileNames: taskInputs(item.task).map((input) => input.name),
+      params: null,
+      paramsHash: '',
+      outcome,
+      inputBytes: result?.meta.inputBytes,
+      outputBytes: result?.meta.outputBytes,
+      errorCode: outcome === 'failed' ? error?.code : undefined,
+    });
+    if (result) job.resolve?.(result);
+    if (error) job.reject?.(error);
+    pump();
+  }
 
-  start: async (id) => {
-    const state = get();
-    const item = state.items.find((i) => i.id === id);
-    if (!item || item.status !== 'queued') return;
-
-    const ac = new AbortController();
-    state.controllers.set(id, ac);
-
-    set((s) => ({
-      items: s.items.map((i) =>
-        i.id === id ? { ...i, status: 'running', startedAt: Date.now(), error: undefined } : i,
-      ),
-    }));
-
+  async function start(item: QueueItem) {
+    const job = jobs.get(item.id)!;
+    const controller = new AbortController();
+    job.controller = controller;
+    update(item.id, { status: 'running' });
+    const options: RunOptions = {
+      taskId: `${item.id}-${item.attempt}`,
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (controller.signal.aborted || jobs.get(item.id) !== job) return;
+        update(item.id, { progress });
+        job.observer?.onProgress?.(progress);
+      },
+    };
     try {
-      const backend = await getBackend();
-      const result = await backend.run(
-        { kind: 'image.process', input: item.input, params: item.params, encode: item.encode },
-        {
-          taskId: id,
-          signal: ac.signal,
-          onProgress: (p) => {
-            set((s) => ({
-              items: s.items.map((i) => (i.id === id ? { ...i, progress: p } : i)),
-            }));
-          },
-        },
-      );
-      set((s) => ({
-        items: s.items.map((i) =>
-          i.id === id
-            ? {
-                ...i,
-                status: 'succeeded',
-                result: result.meta,
-                outputBytes: result.bytes,
-                outputName: result.outputName,
-                finishedAt: Date.now(),
-              }
-            : i,
-        ),
-      }));
-      // 最近任务：只存文件名与参数，不存内容
-      void recordTask({
-        id,
-        createdAt: Date.now(),
-        kind: 'image.process',
-        fileNames: [item.input.name],
-        params: item.params,
-        paramsHash: result.meta.outputHash,
-        outcome: 'succeeded',
-        inputBytes: result.meta.inputBytes,
-        outputBytes: result.meta.outputBytes,
+      const result = job.runner
+        ? await job.runner(item.task, options)
+        : await (await getBackend()).run(item.task, options);
+      if (controller.signal.aborted) finish(item, 'cancelled', undefined, cancelled);
+      else finish(item, 'succeeded', result);
+    } catch (cause) {
+      const error: ToolError = isToolError(cause) ? cause : {
+        code: 'INTERNAL', message: fallbackMessage('INTERNAL'), retryable: true, desktopHint: false,
+      };
+      if (controller.signal.aborted || error.code === 'CANCELLED') finish(item, 'cancelled', undefined, cancelled);
+      else finish(item, 'failed', undefined, error);
+    }
+  }
+
+  function pump() {
+    const { items, paused, concurrency } = get();
+    if (paused) return;
+    const slots = Math.max(0, concurrency - items.filter((item) => item.status === 'running').length);
+    for (const item of items.filter((entry) => entry.status === 'queued').slice(0, slots)) {
+      void start(item);
+    }
+  }
+
+  function add(task: TaskPayload, job: Job = {}) {
+    const id = `${session}-${++counter}`;
+    const item: QueueItem = { id, task, status: 'queued', progress: null, attempt: 0 };
+    const signal = job.observer?.signal;
+    const abort = () => get().cancel(id);
+    if (signal) {
+      signal.addEventListener('abort', abort, { once: true });
+      job.detach = () => signal.removeEventListener('abort', abort);
+    }
+    jobs.set(id, job);
+    set((state) => ({ items: [...state.items, item] }));
+    if (signal?.aborted) abort();
+    else pump();
+    return id;
+  }
+
+  return {
+    items: [],
+    paused: false,
+    concurrency: storedConcurrency(),
+    enqueue: (input, params, encode) => add({ kind: 'image.process', input, params, encode }),
+    submit: (task, observer, runner) => new Promise((resolve, reject) => {
+      add(task, { observer, runner, resolve, reject });
+    }),
+    cancel: (id) => {
+      const item = get().items.find((entry) => entry.id === id);
+      if (item?.status === 'queued') finish(item, 'cancelled', undefined, cancelled);
+      if (item?.status === 'running') jobs.get(id)?.controller?.abort();
+    },
+    retry: (id) => {
+      const item = get().items.find((entry) => entry.id === id);
+      if (!item || (item.status !== 'failed' && item.status !== 'cancelled') || item.attempt >= 3) return;
+      jobs.set(id, { runner: jobs.get(id)?.runner });
+      update(id, { status: 'queued', attempt: item.attempt + 1, progress: null, error: undefined });
+      pump();
+    },
+    remove: (id) => {
+      const item = get().items.find((entry) => entry.id === id);
+      if (!item || isActive(item)) return;
+      jobs.delete(id);
+      set((state) => ({ items: state.items.filter((entry) => entry.id !== id) }));
+    },
+    setPaused: (paused) => {
+      set({ paused });
+      pump();
+    },
+    setConcurrency: (concurrency) => {
+      const value = Math.max(1, Math.min(2, concurrency));
+      try {
+        localStorage.setItem('media-toolbox-queue-concurrency', String(value));
+      } catch {
+        // Queue settings still apply for this session when storage is unavailable.
+      }
+      set({ concurrency: value });
+      pump();
+    },
+    clearFinished: (kind) => {
+      const items = get().items.filter((item) => {
+        if (isActive(item) || (kind && item.task.kind !== kind)) return true;
+        jobs.delete(item.id);
+        return false;
       });
-    } catch (e) {
-      const err = e as ToolError;
-      const cancelled = err?.code === 'CANCELLED';
-      set((s) => ({
-        items: s.items.map((i) =>
-          i.id === id
-            ? {
-                ...i,
-                status: cancelled ? 'cancelled' : 'failed',
-                error: cancelled ? undefined : err,
-                finishedAt: Date.now(),
-              }
-            : i,
-        ),
-      }));
-      void recordTask({
-        id,
-        createdAt: Date.now(),
-        kind: 'image.process',
-        fileNames: [item.input.name],
-        params: item.params,
-        paramsHash: '',
-        outcome: cancelled ? 'cancelled' : 'failed',
-        errorCode: cancelled ? undefined : (err as ToolError)?.code,
-      });
-    } finally {
-      get().controllers.delete(id);
-      // 推进下一个
-      get().pump();
-    }
-  },
+      set({ items });
+    },
+  };
+});
 
-  cancel: (id) => {
-    const state = get();
-    const item = state.items.find((i) => i.id === id);
-    if (!item) return;
-
-    if (item.status === 'queued') {
-      // 队列中的任务：不需要通知后端，直接标记
-      set((s) => ({
-        items: s.items.map((i) =>
-          i.id === id ? { ...i, status: 'cancelled', finishedAt: Date.now() } : i,
-        ),
-      }));
-      return;
-    }
-    if (item.status === 'running') {
-      state.controllers.get(id)?.abort();
-    }
-  },
-
-  retry: async (id) => {
-    const item = get().items.find((i) => i.id === id);
-    if (!item) return;
-    if (item.status !== 'failed' && item.status !== 'cancelled') return;
-    if (item.attempt >= 3) return;
-
-    set((s) => ({
-      items: s.items.map((i) =>
-        i.id === id
-          ? { ...i, status: 'queued', attempt: i.attempt + 1, progress: null, error: undefined }
-          : i,
-      ),
-    }));
-    get().pump();
-  },
-
-  remove: (id) => {
-    const item = get().items.find((i) => i.id === id);
-    if (item?.status === 'running') get().cancel(id);
-    set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
-  },
-
-  setPaused: (paused) => {
-    set({ paused });
-    if (!paused) get().pump();
-  },
-
-  setConcurrency: (n) => set({ concurrency: Math.max(1, Math.min(4, n)) }),
-
-  clearFinished: () =>
-    set((s) => ({
-      items: s.items.filter(
-        (i) => i.status === 'running' || i.status === 'queued',
-      ),
-    })),
-
-  pump: () => {
-    const state = get();
-    if (state.paused) return;
-    const running = state.items.filter((i) => i.status === 'running').length;
-    const slots = state.concurrency - running;
-    if (slots <= 0) return;
-
-    const next = state.items.filter((i) => i.status === 'queued').slice(0, slots);
-    for (const item of next) {
-      void get().start(item.id);
-    }
-  },
-
-  runningCount: () => get().items.filter((i) => i.status === 'running').length,
-
-  totalProgress: () => {
-    const active = get().items.filter(
-      (i) => i.status === 'running' || i.status === 'queued',
-    );
-    if (active.length === 0) return 0;
-    const done = active.filter((i) => i.status !== 'queued');
-    if (done.length === 0) return 0;
-    const sum = done.reduce((acc, i) => {
-      const p = i.progress;
-      if (!p || p.total === 0) return acc + 0;
-      return acc + p.done / p.total;
-    }, 0);
-    return sum / active.length;
-  },
-}));
+export const submitTask: QueueState['submit'] = (...args) => useQueue.getState().submit(...args);

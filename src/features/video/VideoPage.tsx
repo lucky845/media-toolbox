@@ -3,6 +3,7 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { DesktopCta, LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
+import { submitTask } from '../../store/queue';
 import { DESKTOP_RELEASE_URL, formatBytes } from '../../lib/errors';
 import type { InputRef, Progress, ToolError, VideoProbeResult } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
@@ -62,16 +63,11 @@ export function VideoPage() {
     const ac = new AbortController();
     controller.current = ac;
     try {
-      const backend = await getBackend();
-      const out = await backend.run(
+      const out = await submitTask(
         { kind: 'video.transcode', input: file, params: buildParams(form) },
-        {
-          taskId: `video-${Date.now().toString(36)}`,
-          signal: ac.signal,
-          onProgress: (p) => setProgress(p),
-          onLog: () => {},
-        },
+        { signal: ac.signal, onProgress: setProgress },
       );
+      const backend = await getBackend();
       await backend.saveOutput(out.bytes, out.outputName);
       setResult(`已生成 ${out.outputName}（${out.bytes.length > 0 ? `${formatBytes(out.bytes.length)}，` : ''}${out.meta.savingsText}）`);
     } catch (e) {
@@ -96,11 +92,14 @@ export function VideoPage() {
       <div className="card">
         <h2>{browserGuidance ? '导入视频（MP4 / H.264）' : '导入视频'}</h2>
         {browserGuidance && <p className="hint">使用浏览器原生 WebCodecs 转码，支持输出 MP4（H.264）或 WebM（VP9）。</p>}
-        {nativePicker ? (
-          <button type="button" className="btn" onClick={pick} disabled={busy}>选择本机视频</button>
-        ) : (
-          <DropZone accept={accept} multiple={false} onFiles={onFiles} onPick={pick} disabled={busy || !summary} />
-        )}
+        <DropZone
+          accept={accept}
+          multiple={false}
+          onFiles={onFiles}
+          onNativeFiles={nativePicker ? ([ref]) => { if (ref) void loadInput(ref); } : undefined}
+          onPick={pick}
+          disabled={busy || !summary}
+        />
       </div>
 
       <div className="card">

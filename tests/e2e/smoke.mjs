@@ -36,9 +36,10 @@ await page.waitForFunction(
 // ---- 2. 上传文件 ----
 const fileInput = page.locator('input[type="file"]');
 await fileInput.setInputFiles(fixture);
-await page.waitForSelector('dl.kv', { timeout: 20_000 });
+const imageDetails = page.locator('.source-details');
+await imageDetails.waitFor({ timeout: 20_000 });
 
-const metaText = await page.locator('dl.kv').first().innerText();
+const metaText = await imageDetails.innerText();
 
 // ---- 3. 开始处理 ----
 const runBtn = page.getByRole('button', { name: '开始处理' });

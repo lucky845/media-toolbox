@@ -6,7 +6,7 @@
 // 为什么用 `window.__TAURI_INTERNALS__` 而不是 `import.meta.env`：
 // 同样的 dist 会被两种壳加载，构建期环境变量在这里不可靠。
 
-import type { Backend } from './types';
+import type { Backend, NativeDropPayload } from './types';
 import { WebBackend } from './web/webBackend';
 
 let instance: Backend | null = null;
@@ -17,6 +17,12 @@ function isTauriRuntime(): boolean {
   const w = globalThis as Record<string, unknown>;
   return Object.prototype.hasOwnProperty.call(w, '__TAURI_INTERNALS__') ||
     Object.prototype.hasOwnProperty.call(w, '__TAURI__');
+}
+
+export async function listenNativeFileDrop(handler: (payload: NativeDropPayload) => void): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+  return getCurrentWebview().onDragDropEvent(({ payload }) => handler(payload));
 }
 
 export async function getBackend(): Promise<Backend> {

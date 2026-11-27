@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBackend } from '../../lib/backend';
 import { getPdfRenderBackend } from '../../lib/backend/web/pdfRenderBackend';
+import { submitTask } from '../../store/queue';
 import { useCapabilities } from '../../store/capabilities';
 import type { PageRange, ToolError } from '../../lib/backend/types';
 
@@ -155,19 +156,18 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
     setBusy(true);
     setProgress(null);
     setNotice(null);
-    const ac = new AbortController();
     try {
-      const out = await getPdfRenderBackend().render(
-        file,
-        { dpi, pages: ranges, format, quality, background: '#ffffff', longImage },
-        {
-          taskId: `pdf-render-${Date.now().toString(36)}`,
-          signal: ac.signal,
-          onProgress: (p) => setProgress({ done: p.done, total: p.total }),
-        },
-        ac.signal,
-        maxPages,
-      );
+      const task = {
+        kind: 'pdf.render' as const,
+        input: { file, name: file.name, size: file.size },
+        params: { dpi, pages: ranges, format, quality, background: '#ffffff', longImage },
+      };
+      const out = await submitTask(task, {
+        onProgress: ({ done, total }) => setProgress({ done, total }),
+      }, (payload, options) => {
+        if (payload.kind !== 'pdf.render' || !payload.input.file) throw new Error('Expected PDF render file');
+        return getPdfRenderBackend().render(payload.input.file, payload.params, options, options.signal, maxPages);
+      });
       const backend = await getBackend();
       const outputs = out.outputs?.length ? out.outputs : [{ bytes: out.bytes, name: out.outputName }];
       let saved = 0;
