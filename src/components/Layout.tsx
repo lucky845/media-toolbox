@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useCapabilities } from '../store/capabilities';
+import { BrandMark } from './BrandMark';
 
 const NAV = [
   { href: '#/image', label: '图片' },
@@ -55,6 +56,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       <header className="topbar">
         <a className="brand" href="#/image" aria-label="本地多媒体工具箱首页">
+          <BrandMark />
           media-toolbox
         </a>
         <span className="brand-sub">/ LOCAL MEDIA LAB</span>
@@ -104,7 +106,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer className="footer">
-        所有处理都在你的设备上完成，文件不会上传。在线版仅分发代码，但仓库与构建产物是公开的。
+        所有处理都在你的设备上完成，文件不会上传。源码与构建产物公开。
         <br />
         <span className="mono">lucky845 / media-toolbox — schematic sheet</span>
       </footer>

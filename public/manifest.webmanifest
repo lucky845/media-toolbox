@@ -10,7 +10,7 @@
   "lang": "zh-CN",
   "icons": [
     {
-      "src": "./icons/favicon.png",
+      "src": "./icons/media-toolbox-mark.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"

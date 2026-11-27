@@ -23,17 +23,16 @@ export interface CapabilitySummary {
 }
 
 export function summarizeCapabilities(caps: Capabilities): CapabilitySummary {
-  // 判据用「取消是否硬取消 + 是否有 picker」这类**能力字段**，而不是壳的名字。
-  // 这样即使将来出现第三种壳（例如 PWA 独立窗口），这段代码也不用改。
-  const full = caps.cancel.hard && caps.offline.installed && caps.office.wordToPdf === 'native';
+  const desktop = caps.kind === 'desktop';
+  const full = desktop && caps.cancel.hard && caps.offline.installed && caps.video.available && caps.office.wordToPdf === 'native';
 
   return {
-    label: full ? '桌面版 · 全量能力' : '在线版 · 轻量模式',
-    tone: full ? 'ok' : '',
-    formDescription: full ? '桌面版（全量能力）' : '在线版（轻量模式）',
+    label: desktop ? (full ? '桌面版 · 全量能力' : '桌面版 · 部分功能受限') : '在线版 · 轻量模式',
+    tone: desktop ? (full ? 'ok' : 'warn') : '',
+    formDescription: desktop ? (full ? '桌面版（全量能力）' : '桌面版（部分功能受限）') : '在线版（轻量模式）',
     // 在线版的离线能力**取决于 Service Worker 是否真的已激活**。
     // 不能只看「浏览器支持 SW」就宣称可离线 —— 那是「说过要做」而不是「已经做了」。
-    offlineDescription: full
+    offlineDescription: desktop
       ? '完全离线'
       : caps.offline.installed
         ? '已缓存，可离线使用'

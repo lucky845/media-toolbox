@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Media Toolbox</title>
+  <desc id="desc">A media contact sheet framed by precise editing marks.</desc>
+  <rect width="512" height="512" fill="#0c1216"/>
+  <path d="M159 118h-41v41 M353 118h41v41 M159 394h-41v-41 M353 394h41v-41" fill="none" stroke="#4ec2c6" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="171" y="171" width="170" height="170" rx="22" fill="#121b20" stroke="#cedfe3" stroke-width="12"/>
+  <rect x="195" y="195" width="72" height="122" rx="11" fill="#4ec2c6"/>
+  <circle cx="246" cy="218" r="8" fill="#0c1216"/>
+  <path d="m201 294 20-25 17 17 15-21 14 29v9h-66z" fill="#0c1216"/>
+  <rect x="279" y="195" width="38" height="55" rx="9" fill="#d89a3f"/>
+  <rect x="279" y="262" width="38" height="55" rx="9" fill="#cedfe3"/>
+</svg>

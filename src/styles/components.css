@@ -46,14 +46,8 @@
   white-space: nowrap;
   color: var(--ink);
 }
-/* 模拟光标：主页 .cursor，闪烁动画 */
-.brand::after {
-  content: '';
-  width: 0.55rem;
-  height: 1rem;
-  background: var(--cyan);
-  display: inline-block;
-  animation: blink 1.2s steps(1) infinite;
+.brand > img {
+  flex: none;
 }
 @keyframes blink {
   50% {
@@ -137,9 +131,9 @@
   .brand {
     font-size: 0.85rem;
   }
-  .brand::after {
-    width: 0.4rem;
-    height: 0.85rem;
+  .brand > img {
+    width: 24px;
+    height: 24px;
   }
   .nav {
     gap: 0.9rem;
