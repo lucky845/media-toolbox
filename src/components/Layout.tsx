@@ -1,16 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { TOOL_GROUPS, type Route, type ToolRoute } from '../navigation';
 import { useCapabilities } from '../store/capabilities';
 import { BrandMark } from './BrandMark';
+import { ToolIcon } from './ToolIcon';
 
-const NAV = [
-  { href: '#/image', label: '图片' },
-  { href: '#/pdf', label: 'PDF' },
-  { href: '#/video', label: '视频' },
-  { href: '#/documents', label: '文档' },
-  { href: '#/help', label: '能力与限制' },
-];
-
-export function Layout({ children }: { children: React.ReactNode }) {
+export function Layout({ route, children }: { route: Route; children: React.ReactNode }) {
+  const mainRef = useRef<HTMLElement>(null);
+  const group = TOOL_GROUPS.find((item) => item.id === route.group);
+  const tool = group?.tools.find((item) => item.id === route.section);
+  const [expanded, setExpanded] = useState<Partial<Record<ToolRoute['group'], boolean>>>({});
+  const [mobileGroup, setMobileGroup] = useState<ToolRoute['group'] | null>(group?.id ?? null);
+  useEffect(() => {
+    if (route.group === 'help') return;
+    const groupId = route.group;
+    setExpanded((current) => ({ ...current, [groupId]: true }));
+    setMobileGroup(groupId);
+  }, [route.group, route.section]);
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+  }, [route.group, route.section]);
   const { status, summary, error, load } = useCapabilities();
 
   useEffect(() => {
@@ -47,69 +55,110 @@ export function Layout({ children }: { children: React.ReactNode }) {
     };
   }, [load]);
 
-  const activeHash = typeof window !== 'undefined' ? window.location.hash : '';
-
   return (
     <div className="layout">
-      {/* 图纸装订边（≥1280px 显示，与主页一致） */}
-      <div className="ruler" aria-hidden="true" />
-
       <header className="topbar">
-        <a className="brand" href="#/image" aria-label="本地多媒体工具箱首页">
+        <a className="brand" href="#/image">
           <BrandMark />
-          media-toolbox
+          <span>多媒体工具箱</span>
         </a>
-        <span className="brand-sub">/ LOCAL MEDIA LAB</span>
-        <nav className="nav" aria-label="主要导航">
-          {NAV.map((n) => (
-            <a
-              key={n.href}
-              href={n.href}
-              className={activeHash === n.href || (activeHash === '' && n.href === '#/image') ? 'active' : ''}
-            >
-              {n.label}
-            </a>
-          ))}
-        </nav>
+        <div className="topbar-actions">
+          <div className="runtime-status" aria-live="polite">
+            {status === 'loading' && <span className="badge">正在探测能力…</span>}
+            {status === 'ready' && summary && (
+              <span className={`badge ${summary.tone}`}>{summary.label}</span>
+            )}
+            {status === 'failed' && <span className="badge err">能力探测失败</span>}
+          </div>
+          <a className="help-link" href="#/help" aria-current={route.group === 'help' ? 'page' : undefined}>
+            能力与限制
+          </a>
+        </div>
       </header>
 
-      {/* 形态状态属于内容信息，不挤占顶栏导航空间 */}
-      <div className="status-strip" aria-live="polite">
-        {status === 'loading' && <span className="badge">/ 正在探测能力…</span>}
-        {status === 'ready' && summary && (
-          <span className={`badge ${summary.tone}`}>{summary.label}</span>
-        )}
-        {status === 'failed' && <span className="badge err">/ 能力探测失败</span>}
-      </div>
-
-      {status === 'failed' && (
-        <div style={{ padding: '16px clamp(1.5rem, 6vw, 5rem) 0' }}>
-          <div className="notice danger">
-            <span aria-hidden="true">✕</span>
-            <div>
-              <strong>核心模块未能加载，已进入受限模式。</strong>
-              <div className="hint" style={{ marginTop: 4 }}>
-                {error?.message ?? '未知原因'}
-                {error?.detail && (
-                  <div className="mono" style={{ marginTop: 4 }}>{error.detail}</div>
-                )}
+      <div className="workspace-shell">
+        <nav className="tool-sidebar" aria-label="工具栏目">
+          <ul className="mobile-tool-groups">
+            {TOOL_GROUPS.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="tool-group-trigger"
+                  aria-controls={`tools-${item.id}`}
+                  aria-expanded={mobileGroup === item.id}
+                  aria-current={route.group === item.id ? 'true' : undefined}
+                  onClick={() => setMobileGroup((current) => current === item.id ? null : item.id)}
+                >
+                  <span className="tool-group-icon"><ToolIcon name={item.id} /></span>
+                  <span>{item.label}</span>
+                  <span className="tool-chevron" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+          {TOOL_GROUPS.map((item) => {
+            const isCurrent = route.group === item.id;
+            const isExpanded = expanded[item.id] ?? isCurrent;
+            return (
+              <div className="tool-group" key={item.id}>
+                <h2 className="tool-group-heading">
+                  <button
+                    type="button"
+                    className="tool-group-trigger"
+                    aria-controls={`tools-${item.id}`}
+                    aria-expanded={isExpanded}
+                    aria-current={isCurrent ? 'true' : undefined}
+                    onClick={() => setExpanded((current) => ({
+                      ...current,
+                      [item.id]: !(current[item.id] ?? isCurrent),
+                    }))}
+                  >
+                    <span className="tool-group-icon"><ToolIcon name={item.id} /></span>
+                    <span>{item.label}</span>
+                    <span className="tool-chevron" aria-hidden="true" />
+                  </button>
+                </h2>
+                <ul
+                  id={`tools-${item.id}`}
+                  className="tool-list"
+                  data-expanded={isExpanded}
+                  data-mobile-expanded={mobileGroup === item.id}
+                >
+                  {item.tools.map((entry) => (
+                    <li key={entry.id}>
+                      <a
+                        href={`#/${item.id}/${entry.id}`}
+                        aria-current={isCurrent && route.section === entry.id ? 'page' : undefined}
+                      >
+                        <ToolIcon name={entry.id} />
+                        <span>{entry.label}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
+            );
+          })}
+        </nav>
+        <main ref={mainRef} className="workspace-main" aria-labelledby="workspace-title">
+          <div className="workspace-content">
+            {group && <p className="workspace-category">{group.label}</p>}
+            <h1 id="workspace-title">{tool?.label ?? '能力与限制'}</h1>
+            {status === 'failed' && (
+              <div className="notice danger capability-error">
+                <span aria-hidden="true">✕</span>
+                <div>
+                  <strong>核心模块未能加载，已进入受限模式。</strong>
+                  <div className="hint">{error?.message ?? '未知原因'}</div>
+                  {error?.detail && <div className="mono">{error.detail}</div>}
+                </div>
+              </div>
+            )}
+            {children}
+            <footer className="footer">所有处理都在你的设备上完成，文件不会上传。</footer>
           </div>
-        </div>
-      )}
-
-      <main>
-        {/* 角上的十字定位记号（与主页 .reg 一致） */}
-        <span className="reg reg-tl" aria-hidden="true" style={{ left: '6vw', top: '1.4rem' }} />
-        {children}
-      </main>
-
-      <footer className="footer">
-        所有处理都在你的设备上完成，文件不会上传。源码与构建产物公开。
-        <br />
-        <span className="mono">lucky845 / media-toolbox — schematic sheet</span>
-      </footer>
+        </main>
+      </div>
     </div>
   );
 }

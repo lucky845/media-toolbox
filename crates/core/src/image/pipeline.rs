@@ -11,7 +11,7 @@ use crate::common::limits_check::{
 };
 use crate::image::decode::{decode_rgba, probe, sniff_format, RasterImage};
 use crate::image::encode::{encode, prepare_for_format};
-use crate::image::geometry::{apply_orientation, crop, flip, rotate};
+use crate::image::geometry::{apply_orientation, crop, fill_canvas, flip, rotate};
 use crate::image::params::{EncodeOptions, ImageMeta, ImageParams, ImageResult};
 use crate::image::resize::{resize, ResizeCtx};
 use media_ports::codec::{human_bytes, ImageFormat};
@@ -64,6 +64,16 @@ pub fn probe_image(data: &[u8], limits: &Limits) -> Result<ImageMeta> {
     })
 }
 
+fn validate_image_params(params: &ImageParams, input_bytes: u64, limits: &Limits) -> Result<()> {
+    params.validate()?;
+    if let Some(canvas) = params.canvas {
+        check_pixels(canvas.width, canvas.height, limits)?;
+        let peak = estimate_image_peak(canvas.width, canvas.height, input_bytes);
+        check_memory_estimate(peak, limits)?;
+    }
+    Ok(())
+}
+
 /// 完整处理：字节进，字节出。
 pub fn process_image<P: Parallel>(
     input: &[u8],
@@ -74,7 +84,7 @@ pub fn process_image<P: Parallel>(
     // ---- 0. 前置校验（任何一项失败都在解码前返回）----
     let input_bytes = input.len() as u64;
     check_bytes(input_bytes, ctx.limits)?;
-    params.validate()?;
+    validate_image_params(params, input_bytes, ctx.limits)?;
     opts.validate()?;
 
     // ---- 1. 探测 ----
@@ -119,6 +129,9 @@ pub fn process_image<P: Parallel>(
     // ---- 7. 色彩调整 ----
     if let Some(a) = &params.adjust {
         img = crate::image::colorops::adjust(&img, a);
+    }
+    if let Some(canvas) = params.canvas {
+        img = fill_canvas(&img, canvas)?;
     }
 
     ctx.cancel.check().map_err(|_| ToolError::cancelled())?;
@@ -241,7 +254,7 @@ pub fn process_stage_decode<P: Parallel>(
     ctx: &Ctx<'_, P>,
 ) -> Result<RasterImage> {
     check_bytes(input.len() as u64, ctx.limits)?;
-    params.validate()?;
+    validate_image_params(params, input.len() as u64, ctx.limits)?;
     let info = probe(input)?;
     check_pixels(info.width, info.height, ctx.limits)?;
 
@@ -272,6 +285,9 @@ pub fn process_stage_decode<P: Parallel>(
     }
     if let Some(a) = &params.adjust {
         img = crate::image::colorops::adjust(&img, a);
+    }
+    if let Some(canvas) = params.canvas {
+        img = fill_canvas(&img, canvas)?;
     }
     Ok(img)
 }

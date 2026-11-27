@@ -4,7 +4,7 @@
 //! 让 LLVM 能向量化成 `memcpy`/`mov` 批量指令。
 
 use crate::image::decode::RasterImage;
-use crate::image::params::{Flip, Rgba8, Rotation};
+use crate::image::params::{CanvasFill, Flip, Rgba8, Rotation};
 use media_ports::{Result, ToolError};
 
 /// 裁剪。`crop` 已由调用方用 `Crop::clamp_to` 夹进边界。
@@ -138,6 +138,54 @@ pub fn flatten_background(img: &RasterImage, bg: Rgba8) -> RasterImage {
     }
 }
 
+/// 把图片原尺寸居中叠到新画布，奇数边距向右/下多留一个像素。
+pub(crate) fn fill_canvas(img: &RasterImage, canvas: CanvasFill) -> Result<RasterImage> {
+    if canvas.width < img.width || canvas.height < img.height {
+        return Err(ToolError::invalid(format!(
+            "画布需至少为 {}×{}；请增大画布或先缩放图片",
+            img.width, img.height,
+        )));
+    }
+    let stride = (canvas.width as usize)
+        .checked_mul(4)
+        .ok_or_else(|| ToolError::invalid("画布尺寸过大"))?;
+    let len = stride
+        .checked_mul(canvas.height as usize)
+        .ok_or_else(|| ToolError::invalid("画布尺寸过大"))?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(len)
+        .map_err(|_| ToolError::invalid("画布尺寸过大"))?;
+    let bg = canvas.background;
+    for _ in 0..len / 4 {
+        data.extend_from_slice(&[bg.r, bg.g, bg.b, bg.a]);
+    }
+
+    let x = ((canvas.width - img.width) / 2) as usize * 4;
+    let y = ((canvas.height - img.height) / 2) as usize;
+    let source_stride = img.width as usize * 4;
+    for (row, source) in img.data.chunks_exact(source_stride).enumerate() {
+        let start = (y + row) * stride + x;
+        let dest = &mut data[start..start + source_stride];
+        if bg.a == 0 {
+            dest.copy_from_slice(source);
+            continue;
+        }
+        for (fg, pixel) in source.chunks_exact(4).zip(dest.chunks_exact_mut(4)) {
+            let fg_weight = u32::from(fg[3]) * 255;
+            let bg_weight = u32::from(bg.a) * (255 - u32::from(fg[3]));
+            let alpha = fg_weight + bg_weight;
+            for channel in 0..3 {
+                pixel[channel] = ((u32::from(fg[channel]) * fg_weight
+                    + u32::from(pixel[channel]) * bg_weight
+                    + alpha / 2)
+                    / alpha) as u8;
+            }
+            pixel[3] = ((alpha + 127) / 255) as u8;
+        }
+    }
+    RasterImage::new(canvas.width, canvas.height, data)
+}
+
 /// EXIF 方向（1..=8）→ (旋转, 翻转)。
 ///
 /// | 值 | 含义 | 变换 |
@@ -199,6 +247,54 @@ mod tests {
             }
         }
         RasterImage::new(w, h, data).unwrap()
+    }
+
+    #[test]
+    fn test_fill_canvas_centers_and_composites_image() {
+        let img = RasterImage::new(2, 1, vec![255, 0, 0, 128, 0, 255, 0, 255]).unwrap();
+        let canvas = crate::image::params::CanvasFill {
+            width: 5,
+            height: 3,
+            background: Rgba8 {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 255,
+            },
+        };
+        let out = fill_canvas(&img, canvas).unwrap();
+        assert_eq!((out.width, out.height), (5, 3));
+        assert_eq!(out.pixel(0, 0), [0, 0, 255, 255]);
+        assert_eq!(out.pixel(0, 1), [0, 0, 255, 255]);
+        assert_eq!(out.pixel(1, 1), [128, 0, 127, 255]);
+        assert_eq!(out.pixel(2, 1), [0, 255, 0, 255]);
+        assert_eq!(out.pixel(3, 1), [0, 0, 255, 255]);
+        assert!(fill_canvas(
+            &img,
+            crate::image::params::CanvasFill { width: 1, ..canvas }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_fill_canvas_preserves_alpha_on_transparent_background() {
+        let img = RasterImage::new(1, 1, vec![20, 40, 80, 64]).unwrap();
+        let out = fill_canvas(
+            &img,
+            crate::image::params::CanvasFill {
+                width: 3,
+                height: 1,
+                background: Rgba8 {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 0,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(out.pixel(0, 0), [0, 0, 0, 0]);
+        assert_eq!(out.pixel(1, 0), [20, 40, 80, 64]);
     }
 
     #[test]

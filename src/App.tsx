@@ -5,29 +5,26 @@ import { PdfPage } from './features/pdf/PdfPage';
 import { VideoPage } from './features/video/VideoPage';
 import { DocumentsPage } from './features/documents/DocumentsPage';
 import { CapabilitiesPage } from './features/help/CapabilitiesPage';
+import { resolveRoute, type Route } from './navigation';
 
-/** hash 路由（规格 §16：不依赖服务端 rewrite） */
-const ROUTES: Record<string, () => React.ReactElement> = {
-  '#/image': () => <ImagePage />,
-  '#/pdf': () => <PdfPage />,
-  '#/video': () => <VideoPage />,
-  '#/documents': () => <DocumentsPage />,
-  '#/help': () => <CapabilitiesPage />,
-};
-
-function useHashRoute(): string {
-  const [hash, setHash] = useState(() => window.location.hash || '#/image');
-  useEffect(() => {
-    const onHash = () => setHash(window.location.hash || '#/image');
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-  return hash;
+function Workspace({ route }: { route: Route }) {
+  switch (route.group) {
+    case 'image': return <ImagePage section={route.section} />;
+    case 'pdf': return <PdfPage action={route.section} />;
+    case 'video': return <VideoPage />;
+    case 'documents': return <DocumentsPage key={route.section} direction={route.section} />;
+    case 'help': return <CapabilitiesPage />;
+  }
 }
 
 export default function App() {
-  const hash = useHashRoute();
-  const page = ROUTES[hash] ?? ROUTES['#/image']!;
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHashChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
-  return <Layout>{page()}</Layout>;
+  const route = resolveRoute(hash);
+  return <Layout route={route}><Workspace route={route} /></Layout>;
 }

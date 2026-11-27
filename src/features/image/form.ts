@@ -23,6 +23,38 @@ export interface ImageFormState {
   cropPct: { x: number; y: number; w: number; h: number }; // 百分比 0..100
   adjust: Adjust;
   background: { r: number; g: number; b: number };
+  canvasEnabled: boolean;
+  canvasWidth: string;
+  canvasHeight: string;
+  canvasColor: string;
+  canvasTransparent: boolean;
+}
+
+export type ImageSection = 'transform' | 'compress' | 'fill' | 'color' | 'all';
+
+export function normalizeImageSection(section?: string): ImageSection {
+  switch (section) {
+    case 'transform':
+    case 'compress':
+    case 'fill':
+    case 'color':
+      return section;
+    default:
+      return 'all';
+  }
+}
+
+export function canvasError(form: ImageFormState, maxPixels?: number): string | null {
+  if (!form.canvasEnabled) return null;
+  const width = Number(form.canvasWidth);
+  const height = Number(form.canvasHeight);
+  if ([width, height].some((n) => !Number.isInteger(n) || n < 1 || n > 0xffffffff)) {
+    return '请输入大于 0 的整数宽度和高度。';
+  }
+  if (maxPixels !== undefined && maxPixels > 0 && width * height > maxPixels) {
+    return `画布超过 ${(maxPixels / 1e6).toFixed(0)} MP 像素上限。`;
+  }
+  return null;
 }
 
 export function defaultForm(filter: Filter): ImageFormState {
@@ -36,15 +68,43 @@ export function defaultForm(filter: Filter): ImageFormState {
     cropPct: { x: 0, y: 0, w: 100, h: 100 },
     adjust: { brightness: 1, contrast: 1, saturation: 1 },
     background: { r: 255, g: 255, b: 255 },
+    canvasEnabled: false,
+    canvasWidth: '',
+    canvasHeight: '',
+    canvasColor: '#ffffff',
+    canvasTransparent: false,
   };
 }
 
 /** 表单 → Rust core 认识的参数结构 */
-export function buildParams(form: ImageFormState, meta: ImageMeta | null): ImageParams {
+export function buildParams(
+  form: ImageFormState,
+  meta: ImageMeta | null,
+  section: ImageSection = 'all',
+): ImageParams {
+  const transform = section === 'all' || section === 'transform';
+  const color = section === 'all' || section === 'color';
+  const fill = section === 'all' || section === 'fill';
+  const orientedSwap = !!meta && meta.exifOrientation >= 5 && meta.exifOrientation <= 8;
+  const sourceWidth = meta ? (orientedSwap ? meta.height : meta.width) : 0;
+  const sourceHeight = meta ? (orientedSwap ? meta.width : meta.height) : 0;
+  let crop: Crop | null = null;
+  if (transform && form.cropEnabled && meta) {
+    const { x, y, w, h } = form.cropPct;
+    crop = {
+      x: Math.min(sourceWidth - 1, Math.round((sourceWidth * x) / 100)),
+      y: Math.min(sourceHeight - 1, Math.round((sourceHeight * y) / 100)),
+      width: Math.max(1, Math.round((sourceWidth * w) / 100)),
+      height: Math.max(1, Math.round((sourceHeight * h) / 100)),
+    };
+  }
+  const rotatedSwap = form.rotate === 'cw90' || form.rotate === 'cw270';
+  const croppedWidth = crop ? Math.min(crop.width, sourceWidth - crop.x) : sourceWidth;
+  const croppedHeight = crop ? Math.min(crop.height, sourceHeight - crop.y) : sourceHeight;
   const resize =
-    meta && form.scalePercent !== 100
+    transform && meta && form.scalePercent !== 100
       ? {
-          width: Math.max(1, Math.round((meta.width * form.scalePercent) / 100)),
+          width: Math.max(1, Math.round(((rotatedSwap ? croppedHeight : croppedWidth) * form.scalePercent) / 100)),
           height: null,
           mode: form.resizeMode,
           filter: form.filter,
@@ -52,16 +112,16 @@ export function buildParams(form: ImageFormState, meta: ImageMeta | null): Image
         }
       : null;
 
-  let crop: Crop | null = null;
-  if (form.cropEnabled && meta) {
-    const { x, y, w, h } = form.cropPct;
-    crop = {
-      x: Math.round((meta.width * x) / 100),
-      y: Math.round((meta.height * y) / 100),
-      width: Math.max(1, Math.round((meta.width * w) / 100)),
-      height: Math.max(1, Math.round((meta.height * h) / 100)),
-    };
-  }
+  const hex = form.canvasColor;
+  const canvas = fill && form.canvasEnabled && !canvasError(form)
+    ? {
+        width: Number(form.canvasWidth),
+        height: Number(form.canvasHeight),
+        background: form.canvasTransparent
+          ? { r: 0, g: 0, b: 0, a: 0 }
+          : { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16), a: 255 },
+      }
+    : null;
 
   const hasAdjust =
     form.adjust.brightness !== 1 ||
@@ -71,32 +131,33 @@ export function buildParams(form: ImageFormState, meta: ImageMeta | null): Image
   return {
     resize,
     crop,
-    rotate: form.rotate,
-    flip: form.flip,
-    adjust: hasAdjust ? form.adjust : null,
+    rotate: transform ? form.rotate : 'none',
+    flip: transform ? form.flip : 'none',
+    adjust: color && hasAdjust ? form.adjust : null,
+    canvas,
     applyExifOrientation: true,
     background: { ...form.background, a: 255 },
   };
 }
 
 /** 参数的人类可读摘要（用于最近任务与输出命名提示） */
-export function describeParams(form: ImageFormState): string {
+export function describeParams(params: ImageParams): string {
   const parts: string[] = [];
-  if (form.scalePercent !== 100) parts.push(`${form.scalePercent}% (${form.filter})`);
-  if (form.cropEnabled) parts.push('裁剪');
-  if (form.rotate !== 'none') parts.push(`旋转 ${form.rotate}`);
-  if (form.flip !== 'none') parts.push(`翻转 ${form.flip}`);
-  if (form.adjust.brightness !== 1) parts.push(`亮度 ${form.adjust.brightness.toFixed(2)}`);
-  if (form.adjust.contrast !== 1) parts.push(`对比度 ${form.adjust.contrast.toFixed(2)}`);
-  if (form.adjust.saturation !== 1) parts.push(`饱和度 ${form.adjust.saturation.toFixed(2)}`);
-  return parts.length > 0 ? parts.join(' · ') : '仅重编码';
+  if (params.crop) parts.push('裁剪');
+  if (params.rotate !== 'none') parts.push('旋转');
+  if (params.flip !== 'none') parts.push('翻转');
+  if (params.resize) parts.push('缩放');
+  if (params.adjust) parts.push('色彩调整');
+  if (params.canvas) parts.push(`画布 ${params.canvas.width} × ${params.canvas.height}`);
+  return parts.length > 0 ? parts.join(' → ') : '仅重新编码';
 }
 
 /** 透明→JPEG 时是否提醒背景填充：meta.hasAlpha && 目标格式不支持 alpha */
 export function needsBackgroundNotice(
   meta: ImageMeta | null,
   encode: EncodeOptions,
+  canvas?: ImageParams['canvas'],
 ): boolean {
-  if (!meta || !meta.hasAlpha) return false;
-  return encode.format === 'jpeg' || encode.format === 'bmp';
+  const hasAlpha = canvas ? canvas.background.a < 255 : meta?.hasAlpha;
+  return !!hasAlpha && (encode.format === 'jpeg' || encode.format === 'bmp');
 }

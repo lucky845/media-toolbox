@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { DesktopCta, LimitNotice } from '../../components/LimitNotice';
@@ -17,15 +17,25 @@ import { QueuePanel } from '../../components/QueuePanel';
 import { PreviewCompare } from './PreviewCompare';
 import {
   buildParams,
+  canvasError,
   defaultForm,
   describeParams,
   needsBackgroundNotice,
+  normalizeImageSection,
   type ImageFormState,
 } from './form';
 
 const ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff';
 
-export function ImagePage() {
+export function ImagePage({ section }: { section?: string }) {
+  const current = normalizeImageSection(section);
+  const showTransform = current === 'all' || current === 'transform';
+  const showCompress = current === 'all' || current === 'compress';
+  const showFill = current === 'all' || current === 'fill';
+  const showColor = current === 'all' || current === 'color';
+  const canvasHelpId = useId();
+  const canvasErrorId = useId();
+  const outputId = useId();
   const { limits, status } = useCapabilities();
   const settings = useSettings();
 
@@ -44,7 +54,8 @@ export function ImagePage() {
   const items = useQueue((s) => s.items);
   const setConcurrency = useQueue((s) => s.setConcurrency);
   const enqueue = useQueue((s) => s.enqueue);
-  const enqueueMany = useQueue((s) => s.enqueueMany);
+  const paused = useQueue((s) => s.paused);
+  const invalidCanvas = showFill ? canvasError(form, limits?.maxPixels) : null;
 
   useEffect(() => {
     if (limits) setConcurrency(Math.min(limits.maxConcurrent, 2));
@@ -104,12 +115,23 @@ export function ImagePage() {
       setSelected(first);
       setResult(null);
       await probe(first);
-      if (refs.length > 1) {
-        const params = buildParams(form, null);
-        enqueueMany(refs, params, settings.encodeOptions());
+      if (refs.length > 1 && !invalidCanvas) {
+        const backend = await getBackend();
+        const encode = settings.encodeOptions();
+        for (const ref of refs) {
+          let refMeta: ImageMeta | null = null;
+          if (showTransform && (form.cropEnabled || form.scalePercent !== 100)) {
+            try {
+              refMeta = (await backend.probe?.(ref) as ImageMeta | undefined) ?? null;
+            } catch {
+              // The queue reports the backend error for this individual file.
+            }
+          }
+          enqueue(ref, buildParams(form, refMeta, current), encode);
+        }
       }
     },
-    [probe, form, settings, enqueueMany],
+    [probe, form, settings, enqueue, current, invalidCanvas, showTransform],
   );
 
   const handleFiles = useCallback(
@@ -125,9 +147,9 @@ export function ImagePage() {
   }, [adoptFiles]);
 
   const runSingle = useCallback(() => {
-    if (!selected) return;
-    enqueue(selected, buildParams(form, meta), settings.encodeOptions());
-  }, [selected, form, meta, settings, enqueue]);
+    if (!selected || limitBlocked || invalidCanvas || status !== 'ready') return;
+    enqueue(selected, buildParams(form, meta, current), settings.encodeOptions());
+  }, [selected, form, meta, current, settings, enqueue, limitBlocked, invalidCanvas, status]);
 
   // 取最新成功结果用于对比预览
   useEffect(() => {
@@ -144,6 +166,7 @@ export function ImagePage() {
   }, [items]);
 
   const encode = settings.encodeOptions();
+  const params = buildParams(form, meta, current);
   const active = items.filter((i) => i.status === 'running' || i.status === 'queued');
   const finished = items.filter(
     (i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled',
@@ -164,29 +187,38 @@ export function ImagePage() {
       )}
 
       {selected && (
-        <>
           <div className="card">
             <h2>源文件</h2>
             <PreviewCompare before={previewUrl} after={result?.url ?? null} />
-            <div className="row" style={{ marginTop: 12 }}>
-              <strong style={{ wordBreak: 'break-all' }}>{selected.name}</strong>
-            </div>
+            <p className="source-filename">{selected.name}</p>
             {meta && (
-              <dl className="kv" style={{ marginTop: 10 }}>
-                <dt>尺寸</dt>
-                <dd className="mono">
-                  {meta.width} × {meta.height}（{((meta.width * meta.height) / 1e6).toFixed(2)} MP）
-                </dd>
-                <dt>格式</dt>
-                <dd className="mono">{meta.format.toUpperCase()}</dd>
-                <dt>大小</dt>
-                <dd className="mono">{formatBytes(meta.bytes)}</dd>
-                <dt>透明通道</dt>
-                <dd>{meta.hasAlpha ? '有' : '无'}</dd>
-                <dt>EXIF 方向</dt>
-                <dd className="mono">{meta.exifOrientation}</dd>
-                <dt>预计峰值内存</dt>
-                <dd className="mono">{formatBytes(meta.peakMemoryEstimate)}</dd>
+              <dl className="source-details">
+                <div>
+                  <dt>尺寸</dt>
+                  <dd className="mono">
+                    {meta.width} × {meta.height}（{((meta.width * meta.height) / 1e6).toFixed(2)} MP）
+                  </dd>
+                </div>
+                <div>
+                  <dt>格式</dt>
+                  <dd className="mono">{meta.format.toUpperCase()}</dd>
+                </div>
+                <div>
+                  <dt>大小</dt>
+                  <dd className="mono">{formatBytes(meta.bytes)}</dd>
+                </div>
+                <div>
+                  <dt>透明通道</dt>
+                  <dd>{meta.hasAlpha ? '有' : '无'}</dd>
+                </div>
+                <div>
+                  <dt>EXIF 方向</dt>
+                  <dd className="mono">{meta.exifOrientation}</dd>
+                </div>
+                <div>
+                  <dt>预计峰值内存</dt>
+                  <dd className="mono">{formatBytes(meta.peakMemoryEstimate)}</dd>
+                </div>
               </dl>
             )}
             {!meta && !probeError && <span className="hint">读取中…</span>}
@@ -201,9 +233,25 @@ export function ImagePage() {
               </div>
             )}
           </div>
+      )}
 
-          <div className="card">
-            <h2>变换</h2>
+      <form
+        className="col"
+        style={{ gap: 16 }}
+        aria-labelledby={outputId}
+        onSubmit={(event) => {
+          event.preventDefault();
+          runSingle();
+        }}
+      >
+        <p className="hint">
+          {current === 'all'
+            ? '一次应用全部已设参数：裁剪 → 旋转和翻转 → 缩放 → 色彩 → 画布填充 → 编码。'
+            : '本页参数与输出设置用于本次处理。打开「组合」可一次应用各组参数。'}
+        </p>
+        {showTransform && (
+          <fieldset className="card" style={{ minInlineSize: 0 }}>
+            <legend>变换</legend>
             <div className="row" style={{ gap: 18 }}>
               <label className="col" style={{ gap: 4 }}>
                 <span className="hint">旋转</span>
@@ -235,18 +283,6 @@ export function ImagePage() {
                 </select>
               </label>
 
-              <label className="col" style={{ gap: 4 }}>
-                <span className="hint">缩放模式</span>
-                <select
-                  value={form.resizeMode}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, resizeMode: e.target.value as typeof f.resizeMode }))
-                  }
-                >
-                  <option value="fit">保持比例（塞进框）</option>
-                  <option value="fill">保持比例（填满裁剪）</option>
-                </select>
-              </label>
             </div>
 
             <div className="row" style={{ marginTop: 14, gap: 18 }}>
@@ -319,14 +355,91 @@ export function ImagePage() {
                   </label>
                 ))}
                 <span className="hint">
-                  顺序：EXIF 规整 → 裁剪 → 旋转/翻转 → 缩放 → 色彩调整
+                  裁剪区域以自动调整方向后的原图为准。
                 </span>
               </div>
             )}
-          </div>
-
-          <div className="card">
-            <h2>色彩</h2>
+          </fieldset>
+        )}
+        {showCompress && (
+          <fieldset className="card" style={{ minInlineSize: 0 }}>
+            <legend>压缩</legend>
+            <div className="row">
+              <label className="col grow" style={{ gap: 4 }}>
+                <span className="hint">
+                  质量 <span className="mono">{settings.quality}</span>
+                </span>
+                <input
+                  type="range"
+                  disabled={encode.format !== 'jpeg'}
+                  min={10}
+                  max={100}
+                  value={settings.quality}
+                  onChange={(e) => settings.setQuality(Number(e.target.value))}
+                />
+              </label>
+            </div>
+            <p className="hint">质量滑块适用于 JPEG。在输出中选择格式以比较处理后的大小。</p>
+          </fieldset>
+        )}
+        {showFill && (
+          <fieldset className="card" style={{ minInlineSize: 0 }}>
+            <legend>填充</legend>
+            <label className="row" style={{ gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={form.canvasEnabled}
+                onChange={(e) => setForm((f) => ({ ...f, canvasEnabled: e.target.checked }))}
+              />
+              <span>扩展画布</span>
+            </label>
+            <p className="hint" id={canvasHelpId}>
+              图片居中摆放，保持处理后的像素尺寸。画布的宽和高至少要与图片相同。
+            </p>
+            {form.canvasEnabled && (
+              <div className="row" style={{ gap: 14 }}>
+                {(['canvasWidth', 'canvasHeight'] as const).map((dimension) => (
+                  <label className="col" key={dimension} style={{ gap: 4 }}>
+                    <span className="hint">{dimension === 'canvasWidth' ? '画布宽度 (px)' : '画布高度 (px)'}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={0xffffffff}
+                      step={1}
+                      required
+                      style={{ width: 100 }}
+                      aria-invalid={!!invalidCanvas}
+                      aria-describedby={`${canvasHelpId}${invalidCanvas ? ` ${canvasErrorId}` : ''}`}
+                      value={form[dimension]}
+                      onChange={(e) => setForm((f) => ({ ...f, [dimension]: e.target.value }))}
+                    />
+                  </label>
+                ))}
+                <label className="col" style={{ gap: 4 }}>
+                  <span className="hint">画布颜色</span>
+                  <input
+                    type="color"
+                    value={form.canvasColor}
+                    disabled={form.canvasTransparent}
+                    onChange={(e) => setForm((f) => ({ ...f, canvasColor: e.target.value }))}
+                  />
+                </label>
+                <label className="row" style={{ gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={form.canvasTransparent}
+                    onChange={(e) => setForm((f) => ({ ...f, canvasTransparent: e.target.checked }))}
+                  />
+                  <span>透明画布</span>
+                </label>
+              </div>
+            )}
+            {invalidCanvas && <p className="hint" id={canvasErrorId} role="status">{invalidCanvas}</p>}
+          </fieldset>
+        )}
+        {showColor && (
+          <fieldset className="card" style={{ minInlineSize: 0 }}>
+            <legend>色彩</legend>
             <div className="row" style={{ gap: 18 }}>
               {(
                 [
@@ -357,6 +470,7 @@ export function ImagePage() {
             </div>
             <div className="row" style={{ marginTop: 10 }}>
               <button
+                type="button"
                 className="ghost"
                 onClick={() =>
                   setForm((f) => ({ ...f, adjust: { brightness: 1, contrast: 1, saturation: 1 } }))
@@ -366,100 +480,88 @@ export function ImagePage() {
               </button>
               <span className="hint">1.00 表示不变</span>
             </div>
-          </div>
-        </>
-      )}
+          </fieldset>
+        )}
 
-      <div className="card">
-        <h2>输出</h2>
-        <div className="row" style={{ gap: 18 }}>
-          <label className="col" style={{ gap: 4 }}>
-            <span className="hint">格式</span>
-            <select
-              value={settings.format}
-              onChange={(e) => settings.setFormat(e.target.value as EncodeOptions['format'])}
-            >
-              {['jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'].map((f) => (
-                <option key={f} value={f}>
-                  {f.toUpperCase()}
-                </option>
+        <div className="card">
+          <h2 id={outputId}>输出</h2>
+          <div className="row" style={{ gap: 18 }}>
+            <label className="col" style={{ gap: 4 }}>
+              <span className="hint" id="image-format-label">格式</span>
+              <select
+                aria-labelledby="image-format-label"
+                value={settings.format}
+                onChange={(e) => settings.setFormat(e.target.value as EncodeOptions['format'])}
+              >
+                {['jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff'].map((f) => (
+                  <option key={f} value={f}>
+                    {f.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="row" style={{ gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={settings.keepMetadata}
+                onChange={(e) => settings.setKeepMetadata(e.target.checked)}
+              />
+              <span className="hint">保留元数据（默认剥离 EXIF/GPS）</span>
+            </label>
+          </div>
+
+          {needsBackgroundNotice(meta, encode, params.canvas) && (
+            <div style={{ marginTop: 12 }}>
+              <LimitNotice kind="fidelity" title="透明图将转为不透明">
+                {encode.format.toUpperCase()} 不支持 alpha。将用下方背景色填充透明区域。
+              </LimitNotice>
+            </div>
+          )}
+          {(encode.format === 'jpeg' || encode.format === 'bmp') && (
+            <div className="row" style={{ marginTop: 12, gap: 14 }}>
+              <span className="hint">背景填充</span>
+              {(['r', 'g', 'b'] as const).map((c) => (
+                <label className="row" key={c} style={{ gap: 6 }}>
+                  <span className="mono hint">{c.toUpperCase()}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={255}
+                    value={form.background[c]}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        background: {
+                          ...f.background,
+                          [c]: Math.max(0, Math.min(255, Number(e.target.value))),
+                        },
+                      }))
+                    }
+                    style={{ width: 64 }}
+                  />
+                </label>
               ))}
-            </select>
-          </label>
+            </div>
+          )}
 
-          <label className="col grow" style={{ gap: 4 }}>
-            <span className="hint">
-              质量 <span className="mono">{settings.quality}</span>
-            </span>
-            <input
-              type="range"
-              min={10}
-              max={100}
-              value={settings.quality}
-              onChange={(e) => settings.setQuality(Number(e.target.value))}
-            />
-          </label>
-
-          <label className="row" style={{ gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={settings.keepMetadata}
-              onChange={(e) => settings.setKeepMetadata(e.target.checked)}
-            />
-            <span className="hint">保留元数据（默认剥离 EXIF/GPS）</span>
-          </label>
-        </div>
-
-        {needsBackgroundNotice(meta, encode) && (
-          <div style={{ marginTop: 12 }}>
-            <LimitNotice kind="fidelity" title="透明图将转为不透明">
-              {encode.format.toUpperCase()} 不支持 alpha。将用下方背景色填充透明区域。
-            </LimitNotice>
+          <div className="row" style={{ marginTop: 16 }}>
+            <button
+              className="primary"
+              type="submit"
+              disabled={!selected || !!limitBlocked || !!invalidCanvas || status !== 'ready'}
+            >
+              开始处理
+            </button>
+            <span className="hint mono">{describeParams(params)}</span>
           </div>
-        )}
-        {encode.format === 'jpeg' && (
-          <div className="row" style={{ marginTop: 12, gap: 14 }}>
-            <span className="hint">背景填充</span>
-            {(['r', 'g', 'b'] as const).map((c) => (
-              <label className="row" key={c} style={{ gap: 6 }}>
-                <span className="mono hint">{c.toUpperCase()}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={255}
-                  value={form.background[c]}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      background: {
-                        ...f.background,
-                        [c]: Math.max(0, Math.min(255, Number(e.target.value))),
-                      },
-                    }))
-                  }
-                  style={{ width: 64 }}
-                />
-              </label>
-            ))}
-          </div>
-        )}
-
-        <div className="row" style={{ marginTop: 16 }}>
-          <button
-            className="primary"
-            onClick={runSingle}
-            disabled={!selected || !!limitBlocked || status !== 'ready'}
-          >
-            开始处理
-          </button>
-          <span className="hint mono">{describeParams(form)}</span>
         </div>
-      </div>
+      </form>
 
       <QueuePanel
         active={active}
         finished={finished}
-        paused={useQueue.getState().paused}
+        paused={paused}
         onPause={() => {
           const q = useQueue.getState();
           q.setPaused(!q.paused);

@@ -17,10 +17,11 @@ const ACCEPT = '.pdf';
 
 type PdfAction = 'rotate' | 'split' | 'extractPages' | 'extractText' | 'extractImages' | 'merge' | 'render';
 
-export function PdfPage() {
+export function PdfPage({ action }: { action: PdfAction }) {
   const [files, setFiles] = useState<InputRef[]>([]);
   const [meta, setMeta] = useState<PdfMeta | null>(null);
-  const [action, setAction] = useState<PdfAction>('rotate');
+
+  const [runAction, setRunAction] = useState<PdfAction | null>(null);
   const [degrees, setDegrees] = useState(90);
   const [rangeText, setRangeText] = useState('');
   const [error, setError] = useState<ToolError | null>(null);
@@ -35,6 +36,7 @@ export function PdfPage() {
 
   const onFiles = useCallback(async (refs: InputRef[]) => {
     const version = ++selectionVersion.current;
+    setRunAction(null);
     setError(null);
     setMeta(null);
     setResult(null);
@@ -126,6 +128,7 @@ export function PdfPage() {
 
   async function run() {
     if (!files[0] || !meta || meta.encrypted || busy || probing || action === 'render') return;
+    setRunAction(action);
     setOutputStatus('');
     setBusy(true);
     setError(null);
@@ -239,29 +242,7 @@ export function PdfPage() {
       </div>
 
       <div className="card">
-        <h2>操作</h2>
-        <div className="row" style={{ gap: 10 }}>
-          {([
-            ['rotate', '旋转'],
-            ['split', '拆分'],
-            ['extractPages', '提取页面'],
-            ['extractText', '提取文本'],
-            ['extractImages', '提取图片'],
-            ['merge', '合并'],
-            ['render', '渲染图片'],
-          ] as Array<[PdfAction, string]>).map(([k, label]) => (
-            <button key={k} type="button" className={action === k ? 'primary' : 'ghost'}
-              disabled={busy} aria-pressed={action === k} onClick={() => {
-                setAction(k);
-                setResult(null);
-                setExtracted(null);
-                setOutputStatus('');
-                if (meta) setError(null);
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
+        <h2>{action === 'render' ? '渲染设置' : '处理设置'}</h2>
 
         {action !== 'merge' && action !== 'render' && (
           <div className="row" style={{ marginTop: 14, gap: 14 }}>
@@ -308,11 +289,11 @@ export function PdfPage() {
         <div className="card"><span className="hint">{first ? '正在读取 PDF…' : '请选择 PDF 文件'}</span></div>
       )}
 
-      <div role="status" hidden={!outputStatus && !result}>
+      <div role="status" hidden={runAction !== action || (!outputStatus && !result)}>
         {(outputStatus || result) && <div className="notice info">{outputStatus || result}</div>}
       </div>
-      {error && <ErrorBanner error={error} />}
-      {extracted && (
+      {error && (runAction === null || runAction === action) && <ErrorBanner error={error} />}
+      {runAction === action && extracted && (
         <div className="card">
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0 }}>提取的文本</h2>

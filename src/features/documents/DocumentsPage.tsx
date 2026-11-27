@@ -9,10 +9,10 @@ import { useCapabilities } from '../../store/capabilities';
 
 type Direction = 'docx2pdf' | 'pdf2docx';
 
-export function DocumentsPage() {
+export function DocumentsPage({ direction }: { direction: Direction }) {
   const { caps, summary } = useCapabilities();
   const [file, setFile] = useState<InputRef | null>(null);
-  const [direction, setDirection] = useState<Direction>('docx2pdf');
+  const accept = direction === 'docx2pdf' ? '.docx' : '.pdf';
   const [error, setError] = useState<ToolError | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,9 +41,13 @@ export function DocumentsPage() {
 
   const pick = useCallback(async () => {
     const backend = await getBackend();
-    const refs = await backend.pickFiles('.docx,.pdf', false);
-    if (refs[0]) setFile(refs[0]);
-  }, []);
+    const refs = await backend.pickFiles(accept, false);
+    if (refs[0]) {
+      setFile(refs[0]);
+      setError(null);
+      setResult(null);
+    }
+  }, [accept]);
 
   // 能力驱动：桌面有 LibreOffice → 走 office.convert（原生高保真）；
   // 在线版无外部进程 → 退回 office.structure（结构化 + 保真度声明）。
@@ -84,18 +88,8 @@ export function DocumentsPage() {
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
-        <h2>Word ↔ PDF</h2>
-        <div className="row" style={{ gap: 10 }}>
-          <button className={direction === 'docx2pdf' ? 'primary' : 'ghost'} onClick={() => setDirection('docx2pdf')}>
-            Word (.docx) → PDF
-          </button>
-          <button className={direction === 'pdf2docx' ? 'primary' : 'ghost'} onClick={() => setDirection('pdf2docx')}>
-            PDF → Word (.docx)
-          </button>
-        </div>
-        <div style={{ marginTop: 14 }}>
-          <DropZone accept={direction === 'docx2pdf' ? '.docx' : '.pdf'} multiple={false} onFiles={onFiles} onPick={pick} />
-        </div>
+        <h2>{direction === 'docx2pdf' ? '导入 Word (.docx)' : '导入 PDF'}</h2>
+        <DropZone accept={accept} multiple={false} onFiles={onFiles} onPick={pick} />
         {file && (
           <div className="row" style={{ marginTop: 12 }}>
             <span className="mono">{file.name}</span>
