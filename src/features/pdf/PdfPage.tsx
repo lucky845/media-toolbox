@@ -3,6 +3,7 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
+import { submitTask } from '../../store/queue';
 import { useCapabilities } from '../../store/capabilities';
 import { PdfPreview } from './PdfPreview';
 import { formatBytes, isToolError } from '../../lib/errors';
@@ -134,8 +135,6 @@ export function PdfPage({ action }: { action: PdfAction }) {
     setError(null);
     setResult(null);
     setExtracted(null);
-    const id = `pdf-${crypto.randomUUID()}`;
-    const ac = new AbortController();
     const ranges = action === 'merge' ? [] : parseRanges();
     if (!ranges) {
       setError({ code: 'INVALID_PARAMS', message: '页码范围无效，请使用如 1-3,5 的格式，并且不能超过 PDF 页数', retryable: false, desktopHint: false });
@@ -172,12 +171,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
     }
 
     try {
-      const backend = await getBackend();
-      const out = await backend.run(task!, {
-        taskId: id,
-        signal: ac.signal,
-        onProgress: () => {},
-      });
+      const out = await submitTask(task!);
       if (action === 'extractText') {
         const textBytes = out.text ? new TextEncoder().encode(out.text) : out.bytes;
         setExtracted(textBytes);
@@ -193,6 +187,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
           setResult('选定页面没有可提取的嵌入图片');
           return;
         }
+        const backend = await getBackend();
         let saved = 0;
         for (const item of outputs) {
           if (await backend.saveOutput(item.bytes, item.name, { directDownload: true }) !== 'cancelled') saved++;
@@ -211,12 +206,14 @@ export function PdfPage({ action }: { action: PdfAction }) {
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>导入 PDF</h2>
-        {nativePicker ? (
-          <button type="button" onClick={() => void pick()} disabled={busy}>选择 PDF 文件</button>
-        ) : (
-          <DropZone accept={ACCEPT} onFiles={(items) => void onFiles(items.map((file) => ({ file, name: file.name, size: file.size })))}
-            onPick={pick} multiple disabled={busy} />
-        )}
+        <DropZone
+          accept={ACCEPT}
+          onFiles={(items) => void onFiles(items.map((file) => ({ file, name: file.name, size: file.size })))}
+          onNativeFiles={nativePicker ? onFiles : undefined}
+          onPick={pick}
+          multiple
+          disabled={busy}
+        />
         {action === 'merge' && files.length > 1 && (
           <ol aria-label="PDF 合并顺序" style={{ margin: '12px 0 0', paddingLeft: 22 }}>
             {files.map((file, index) => (

@@ -15,6 +15,8 @@ interface SettingsState {
   keepMetadata: boolean;
   /** 是否显示开发者日志 */
   showLogs: boolean;
+  /** 是否在本机保存最近任务记录 */
+  recordHistory: boolean;
   /** 输出命名模板：{stem} = 原名，{digest} = 参数摘要，{ext} = 扩展名 */
   nameTemplate: string;
 
@@ -23,6 +25,7 @@ interface SettingsState {
   setFilter: (f: Filter) => void;
   setKeepMetadata: (v: boolean) => void;
   setShowLogs: (v: boolean) => void;
+  setRecordHistory: (v: boolean) => void;
   setNameTemplate: (v: string) => void;
   encodeOptions: () => EncodeOptions;
 }
@@ -35,6 +38,7 @@ export const useSettings = create<SettingsState>()(
       filter: 'lanczos3',
       keepMetadata: false,
       showLogs: false,
+      recordHistory: true,
       nameTemplate: '{stem}-{digest}',
 
       setFormat: (format) => set({ format }),
@@ -42,6 +46,7 @@ export const useSettings = create<SettingsState>()(
       setFilter: (filter) => set({ filter }),
       setKeepMetadata: (keepMetadata) => set({ keepMetadata }),
       setShowLogs: (showLogs) => set({ showLogs }),
+      setRecordHistory: (recordHistory) => set({ recordHistory }),
       setNameTemplate: (nameTemplate) => set({ nameTemplate }),
 
       encodeOptions: () => {
@@ -65,6 +70,7 @@ export const useSettings = create<SettingsState>()(
         filter: s.filter,
         keepMetadata: s.keepMetadata,
         showLogs: s.showLogs,
+        recordHistory: s.recordHistory,
         nameTemplate: s.nameTemplate,
       }),
     },

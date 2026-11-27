@@ -29,11 +29,14 @@ export type ToolRoute = {
     section: Group['tools'][number]['id'];
   };
 }[Groups[number]['id']];
-export type Route = ToolRoute | { group: 'help'; section: 'info' };
+export type ActivityRoute = { group: 'tasks'; section: 'queue' | 'history' };
+export type Route = ToolRoute | ActivityRoute | { group: 'settings'; section: 'preferences' } | { group: 'help'; section: 'info' };
 
 export function resolveRoute(hash: string): Route {
   const [, group, section] = hash.split('/');
   if (group === 'help') return { group: 'help', section: 'info' };
+  if (group === 'settings') return { group: 'settings', section: 'preferences' };
+  if (group === 'tasks') return { group: 'tasks', section: section === 'history' ? 'history' : 'queue' };
   const match = TOOL_GROUPS.find((item) => item.id === group) ?? TOOL_GROUPS[0];
   const tool = match.tools.find((item) => item.id === section) ?? match.tools[0];
   // The section is selected only from this group's own tools.

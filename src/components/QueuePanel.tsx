@@ -1,4 +1,4 @@
-import { useQueue, type QueueItem } from '../store/queue';
+import { type QueueItem } from '../store/queue';
 import { TaskCard } from './TaskCard';
 
 /** 批量队列面板：单任务进度 + 总进度 + 队列级暂停 */
@@ -15,8 +15,10 @@ export function QueuePanel({
   onPause: () => void;
   onClear: () => void;
 }) {
-  const overall = useQueue((s) => s.totalProgress);
-  const runningCount = useQueue((s) => s.runningCount);
+  const runningCount = active.filter((item) => item.status === 'running').length;
+  const overall = active.length ? active.reduce((sum, { progress }) => (
+    sum + (progress && progress.total > 0 ? Math.min(1, Math.max(0, progress.done / progress.total)) : 0)
+  ), 0) / active.length : 0;
 
   return (
     <>
@@ -25,7 +27,7 @@ export function QueuePanel({
           <h2>队列 · {active.length} 项</h2>
           <div className="row" style={{ marginBottom: 12 }}>
             <span className="hint mono">
-              总进度 {(overall() * 100).toFixed(0)}% · 运行中 {runningCount()}
+              总进度 {(overall * 100).toFixed(0)}% · 运行中 {runningCount}
             </span>
             <span className="grow" />
             <button onClick={onPause} className="ghost">
@@ -33,7 +35,7 @@ export function QueuePanel({
             </button>
           </div>
           <div className="progress" style={{ marginBottom: 14 }}>
-            <div style={{ width: `${overall() * 100}%` }} />
+            <div style={{ width: `${overall * 100}%` }} />
           </div>
           {active.map((item) => (
             <TaskCard key={item.id} item={item} />

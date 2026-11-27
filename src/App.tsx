@@ -5,6 +5,8 @@ import { PdfPage } from './features/pdf/PdfPage';
 import { VideoPage } from './features/video/VideoPage';
 import { DocumentsPage } from './features/documents/DocumentsPage';
 import { CapabilitiesPage } from './features/help/CapabilitiesPage';
+import { SettingsPage } from './features/activity/SettingsPage';
+import { TaskCenterPage } from './features/activity/TaskCenterPage';
 import { resolveRoute, type Route } from './navigation';
 
 function Workspace({ route }: { route: Route }) {
@@ -14,6 +16,8 @@ function Workspace({ route }: { route: Route }) {
     case 'video': return <VideoPage />;
     case 'documents': return <DocumentsPage key={route.section} direction={route.section} />;
     case 'help': return <CapabilitiesPage />;
+    case 'tasks': return <TaskCenterPage section={route.section} />;
+    case 'settings': return <SettingsPage />;
   }
 }
 

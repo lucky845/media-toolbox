@@ -3,6 +3,7 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
+import { submitTask } from '../../store/queue';
 import { formatBytes } from '../../lib/errors';
 import type { InputRef, ToolError } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
@@ -32,22 +33,17 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
     }
   };
 
-  const onFiles = useCallback((fs: File[]) => {
+  const adoptFiles = useCallback(([ref]: InputRef[]) => {
+    if (!ref) return;
+    setFile(ref);
     setError(null);
     setResult(null);
-    const f = fs[0];
-    if (f) setFile({ file: f, name: f.name, size: f.size });
   }, []);
 
   const pick = useCallback(async () => {
     const backend = await getBackend();
-    const refs = await backend.pickFiles(accept, false);
-    if (refs[0]) {
-      setFile(refs[0]);
-      setError(null);
-      setResult(null);
-    }
-  }, [accept]);
+    adoptFiles(await backend.pickFiles(accept, false));
+  }, [accept, adoptFiles]);
 
   // 能力驱动：桌面有 LibreOffice → 走 office.convert（原生高保真）；
   // 在线版无外部进程 → 退回 office.structure（结构化 + 保真度声明）。
@@ -62,17 +58,13 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
     setBusy(true);
     setError(null);
     setResult(null);
-    const id = `office-${Date.now().toString(36)}`;
-    const ac = new AbortController();
     try {
-      const backend = await getBackend();
-      const out = await backend.run(
+      const out = await submitTask(
         isNative
           ? { kind: 'office.convert', input: file, direction }
           : { kind: 'office.structure', input: file, direction },
-        { taskId: id, signal: ac.signal, onProgress: () => {} },
       );
-      await backend.saveOutput(out.bytes, out.outputName);
+      await (await getBackend()).saveOutput(out.bytes, out.outputName);
       setResult(
         isNative
           ? `已生成 ${out.outputName}（LibreOffice 原生转换）`
@@ -89,7 +81,14 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>{direction === 'docx2pdf' ? '导入 Word (.docx)' : '导入 PDF'}</h2>
-        <DropZone accept={accept} multiple={false} onFiles={onFiles} onPick={pick} />
+        <DropZone
+          accept={accept}
+          multiple={false}
+          onFiles={(files) => adoptFiles(files.map((file) => ({ file, name: file.name, size: file.size })))}
+          onNativeFiles={caps?.fileSystem.nativeFilePicker ? adoptFiles : undefined}
+          onPick={pick}
+          disabled={busy}
+        />
         {file && (
           <div className="row" style={{ marginTop: 12 }}>
             <span className="mono">{file.name}</span>

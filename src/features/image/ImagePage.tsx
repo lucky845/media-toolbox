@@ -36,7 +36,7 @@ export function ImagePage({ section }: { section?: string }) {
   const canvasHelpId = useId();
   const canvasErrorId = useId();
   const outputId = useId();
-  const { limits, status } = useCapabilities();
+  const { caps, limits, status } = useCapabilities();
   const settings = useSettings();
 
   const [selected, setSelected] = useState<InputRef | null>(null);
@@ -153,30 +153,31 @@ export function ImagePage({ section }: { section?: string }) {
 
   // 取最新成功结果用于对比预览
   useEffect(() => {
-    const latest = [...items].reverse().find((i) => i.status === 'succeeded');
-    if (latest?.outputBytes && latest.result) {
+    const latest = [...items].reverse().find((i) => i.status === 'succeeded' && i.task.kind === 'image.process' && i.task.input === selected)?.result;
+    if (latest?.bytes.length) {
       if (resultRef.current) URL.revokeObjectURL(resultRef.current);
-      const blob = new Blob([latest.outputBytes.slice().buffer as ArrayBuffer], {
-        type: `image/${latest.result.outFormat}`,
+      const blob = new Blob([latest.bytes.slice().buffer as ArrayBuffer], {
+        type: `image/${latest.meta.outFormat}`,
       });
       const url = URL.createObjectURL(blob);
       resultRef.current = url;
-      setResult({ url, bytes: latest.outputBytes.length });
+      setResult({ url, bytes: latest.bytes.length });
     }
-  }, [items]);
+  }, [items, selected]);
 
   const encode = settings.encodeOptions();
   const params = buildParams(form, meta, current);
-  const active = items.filter((i) => i.status === 'running' || i.status === 'queued');
+  const active = items.filter((i) => i.task.kind === 'image.process' && (i.status === 'running' || i.status === 'queued'));
   const finished = items.filter(
-    (i) => i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled',
+    (i) => i.task.kind === 'image.process' && (i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled'),
   );
 
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>导入</h2>
-        <DropZone accept={ACCEPT} onFiles={handleFiles} onPick={handlePick} />
+        <DropZone accept={ACCEPT} onFiles={handleFiles}
+          onNativeFiles={caps?.fileSystem.nativeFilePicker ? adoptFiles : undefined} onPick={handlePick} />
       </div>
 
       {status === 'failed' && (
@@ -566,7 +567,7 @@ export function ImagePage({ section }: { section?: string }) {
           const q = useQueue.getState();
           q.setPaused(!q.paused);
         }}
-        onClear={() => useQueue.getState().clearFinished()}
+        onClear={() => useQueue.getState().clearFinished('image.process')}
       />
     </div>
   );

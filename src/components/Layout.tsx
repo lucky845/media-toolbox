@@ -8,14 +8,19 @@ export function Layout({ route, children }: { route: Route; children: React.Reac
   const mainRef = useRef<HTMLElement>(null);
   const group = TOOL_GROUPS.find((item) => item.id === route.group);
   const tool = group?.tools.find((item) => item.id === route.section);
+  const toolGroupId = group?.id;
+  const workspaceTitle = tool?.label
+    ?? (route.group === 'tasks' ? '任务中心' : route.group === 'settings' ? '设置' : '能力与限制');
   const [expanded, setExpanded] = useState<Partial<Record<ToolRoute['group'], boolean>>>({});
   const [mobileGroup, setMobileGroup] = useState<ToolRoute['group'] | null>(group?.id ?? null);
   useEffect(() => {
-    if (route.group === 'help') return;
-    const groupId = route.group;
-    setExpanded((current) => ({ ...current, [groupId]: true }));
-    setMobileGroup(groupId);
-  }, [route.group, route.section]);
+    if (!toolGroupId) {
+      setMobileGroup(null);
+      return;
+    }
+    setExpanded((current) => ({ ...current, [toolGroupId]: true }));
+    setMobileGroup(toolGroupId);
+  }, [toolGroupId, route.section]);
   useEffect(() => {
     mainRef.current?.scrollTo(0, 0);
   }, [route.group, route.section]);
@@ -70,9 +75,17 @@ export function Layout({ route, children }: { route: Route; children: React.Reac
             )}
             {status === 'failed' && <span className="badge err">能力探测失败</span>}
           </div>
-          <a className="help-link" href="#/help" aria-current={route.group === 'help' ? 'page' : undefined}>
-            能力与限制
-          </a>
+          <nav className="workspace-links" aria-label="工作区">
+            <a className="help-link" href="#/tasks/queue" aria-current={route.group === 'tasks' ? 'location' : undefined}>
+              任务中心
+            </a>
+            <a className="help-link" href="#/settings" aria-current={route.group === 'settings' ? 'page' : undefined}>
+              设置
+            </a>
+            <a className="help-link" href="#/help" aria-current={route.group === 'help' ? 'page' : undefined}>
+              能力与限制
+            </a>
+          </nav>
         </div>
       </header>
 
@@ -143,7 +156,7 @@ export function Layout({ route, children }: { route: Route; children: React.Reac
         <main ref={mainRef} className="workspace-main" aria-labelledby="workspace-title">
           <div className="workspace-content">
             {group && <p className="workspace-category">{group.label}</p>}
-            <h1 id="workspace-title">{tool?.label ?? '能力与限制'}</h1>
+            <h1 id="workspace-title">{workspaceTitle}</h1>
             {status === 'failed' && (
               <div className="notice danger capability-error">
                 <span aria-hidden="true">✕</span>

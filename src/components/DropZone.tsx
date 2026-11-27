@@ -1,87 +1,161 @@
-import { useCallback, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useId, useRef, useState, type DragEvent } from 'react';
+import type { DragDropEvent } from '@tauri-apps/api/webview';
+import type { InputRef } from '../lib/backend/types';
 
 interface Props {
   accept: string;
   multiple?: boolean;
   onFiles: (files: File[]) => void;
-  onPick: () => void;
+  onNativeFiles?: (files: InputRef[]) => void;
+  onPick?: () => void;
   disabled?: boolean;
 }
 
-/** 拖放 + 点击选择。拖放是浏览器 API，两壳共用同一组件。 */
-export function DropZone({ accept, multiple = true, onFiles, onPick, disabled }: Props) {
+function matchesAccept(accept: string, name: string, mime = '') {
+  const tokens = accept.toLowerCase().split(',').map((token) => token.trim()).filter(Boolean);
+  const lowerName = name.toLowerCase();
+  const lowerMime = mime.toLowerCase();
+  return tokens.length === 0 || tokens.some((token) => {
+    if (token.startsWith('.')) return lowerName.endsWith(token);
+    if (token.endsWith('/*')) return lowerMime.startsWith(token.slice(0, -1));
+    return lowerMime === token;
+  });
+}
+
+function isFileDrag(event: DragEvent) {
+  return event.dataTransfer.types.includes('Files') || event.dataTransfer.files.length > 0;
+}
+
+export function DropZone({ accept, multiple = true, onFiles, onNativeFiles, onPick, disabled }: Props) {
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
+  const target = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const helpId = useId();
+  const formatsId = useId();
+  const native = onNativeFiles !== undefined;
 
-  const onDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    depth.current += 1;
-    if (depth.current === 1) setDragging(true);
-  }, []);
+  const resetDrag = () => {
+    depth.current = 0;
+    setDragging(false);
+  };
 
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    depth.current -= 1;
-    if (depth.current <= 0) {
-      depth.current = 0;
-      setDragging(false);
+  const onNativeDrag = useEffectEvent((payload: DragDropEvent) => {
+    if (payload.type === 'leave') {
+      resetDrag();
+      return;
     }
-  }, []);
+    // Tauri reports physical pixels; DOM hit testing expects CSS pixels.
+    const x = payload.position.x / window.devicePixelRatio;
+    const y = payload.position.y / window.devicePixelRatio;
+    const hit = document.elementFromPoint(x, y);
+    const inside = !!hit && !!target.current?.contains(hit);
+    if (payload.type !== 'drop') {
+      setDragging(inside && !disabled);
+      return;
+    }
+    resetDrag();
+    if (!inside || disabled) return;
+    const files = payload.paths.flatMap((path) => {
+      const name = path.split(/[\\/]/).pop() ?? '';
+      return name && matchesAccept(accept, name) ? [{ path, name, size: 0 }] : [];
+    });
+    if (files.length > 0) onNativeFiles?.(multiple ? files : files.slice(0, 1));
+  });
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      depth.current = 0;
-      setDragging(false);
-      if (disabled) return;
-      const files = Array.from(e.dataTransfer.files).filter((f) => f.size > 0);
-      if (files.length > 0) onFiles(files);
-    },
-    [disabled, onFiles],
-  );
+  useEffect(() => {
+    if (!native) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+        if (disposed) return;
+        const stop = await getCurrentWebview().onDragDropEvent(({ payload }) => {
+          if (!disposed) onNativeDrag(payload);
+        });
+        if (disposed) stop();
+        else unlisten = stop;
+      } catch (error) {
+        if (!disposed) console.warn('无法监听系统文件拖放', error);
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [native]);
+
+  const submitFiles = (files: File[]) => {
+    if (disabled || native) return;
+    const accepted = files.filter((file) => matchesAccept(accept, file.name, file.type));
+    if (accepted.length > 0) onFiles(multiple ? accepted : accepted.slice(0, 1));
+  };
 
   return (
     <div
-      className={`dropzone ${dragging ? 'dragover' : ''}`}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled}
-      onDragEnter={onDragEnter}
-      onDragOver={(e) => e.preventDefault()}
-      onDragLeave={onDragLeave}
-      onDrop={onDrop}
-      onClick={() => !disabled && onPick()}
-      onKeyDown={(e) => {
-        if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          onPick();
+      ref={target}
+      onDragEnter={(event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        if (!disabled && !native) {
+          depth.current += 1;
+          setDragging(true);
         }
       }}
+      onDragOver={(event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = disabled || native ? 'none' : 'copy';
+      }}
+      onDragLeave={() => {
+        depth.current = Math.max(0, depth.current - 1);
+        if (depth.current === 0) setDragging(false);
+      }}
+      onDrop={(event) => {
+        // Consume drops over the target, even when disabled or unsupported, so the page stays open.
+        event.preventDefault();
+        event.stopPropagation();
+        resetDrag();
+        const items = Array.from(event.dataTransfer.items).filter((item) => item.kind === 'file');
+        const files = items.length > 0
+          ? items.flatMap((item) => {
+              if (item.webkitGetAsEntry?.()?.isDirectory) return [];
+              const file = item.getAsFile();
+              return file ? [file] : [];
+            })
+          : Array.from(event.dataTransfer.files);
+        submitFiles(files);
+      }}
     >
-      <span className="dropzone-mark" aria-hidden="true"><span>+</span></span>
-      <span className="dropzone-title">{dragging ? '松开以添加文件' : '选择文件'}</span>
-      <span className="dropzone-formats">{accept.replaceAll('.', '').replaceAll(',', ' / ').toUpperCase()}</span>
-      <span className="hint">也可以拖放到这里</span>
-      {/*
-        这个 input 是「原生文件选择」的兜底通道：
-        - 点击区块时优先走 onPick（由 Backend 决定用 input 还是系统对话框）；
-        - 但无 onPick 时（或希望完全绕过 Backend 的测试/无障碍场景），
-          用户仍可以直接触发这个 input。
-        它必须是真正可用的，不能只是装饰 —— 否则键盘用户与自动化测试都走不通。
-      */}
-      <input
+      <button
+        type="button"
+        className={`dropzone ${dragging && !disabled ? 'dragover' : ''}`}
+        style={{ width: '100%', pointerEvents: disabled ? 'none' : undefined }}
+        aria-label="选择文件"
+        aria-describedby={`${formatsId} ${helpId}`}
+        aria-disabled={disabled}
+        disabled={disabled}
+        onClick={() => onPick ? onPick() : input.current?.click()}
+      >
+        <span className="dropzone-mark" aria-hidden="true"><span>+</span></span>
+        <span className="dropzone-title">{dragging && !disabled ? '松开以添加文件' : '选择文件'}</span>
+        <span id={formatsId} className="dropzone-formats">{accept.replaceAll('.', '').replaceAll(',', ' / ').toUpperCase()}</span>
+        <span id={helpId} className="hint">也可以拖放到这里</span>
+      </button>
+      {!native && <input
+        ref={input}
         type="file"
         accept={accept}
         multiple={multiple}
-        className="sr-only"
-        tabIndex={-1}
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          if (files.length > 0) onFiles(files);
-          // 允许重复选择同一个文件
-          e.target.value = '';
+        hidden
+        disabled={disabled}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = '';
+          submitFiles(files);
         }}
-      />
+      />}
     </div>
   );
 }
