@@ -71,7 +71,14 @@ export interface Rgba8 {
   a: number;
 }
 
+export interface CanvasFill {
+  width: number;
+  height: number;
+  background: Rgba8;
+}
+
 export interface ImageParams {
+  canvas?: CanvasFill | null;
   resize?: Resize | null;
   crop?: Crop | null;
   rotate: Rotation;

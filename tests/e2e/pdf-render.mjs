@@ -20,7 +20,7 @@ await page.locator('input[type="file"]').setInputFiles(fixture);
 await page.waitForSelector('dl.kv', { timeout: 30_000 });
 
 // 切到渲染页
-await page.getByRole('button', { name: '渲染图片' }).click();
+await page.getByRole('link', { name: '渲染图片' }).click();
 await page.waitForSelector('h2:has-text("页面预览与图片导出")', { timeout: 20_000 });
 
 // 等待第一页画布画出真实像素（width>0 + canvas 非全白）

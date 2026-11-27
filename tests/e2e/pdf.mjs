@@ -42,7 +42,7 @@ try {
 
   await page.reload();
   await uploadAndProbe([pdf('first.pdf'), pdf('second.pdf', secondFixture)]);
-  await page.getByRole('button', { name: '合并', exact: true }).click();
+  await page.getByRole('link', { name: '合并', exact: true }).click();
   const downloadDone = page.waitForEvent('download', { timeout: 40_000 });
   await execute.click();
   const download = await downloadDone;
@@ -57,12 +57,12 @@ try {
 
   await page.reload();
   await uploadAndProbe(Array.from({ length: 51 }, (_, i) => pdf(`input-${i}.pdf`)));
-  await page.getByRole('button', { name: '合并', exact: true }).click();
+  await page.getByRole('link', { name: '合并', exact: true }).click();
   await execute.click();
   await page.getByText(/合并最多支持 50 个 PDF/).waitFor();
   await page.reload();
   await uploadAndProbe(pdf('extract.pdf'));
-  await page.getByRole('button', { name: '提取页面', exact: true }).click();
+  await page.getByRole('link', { name: '提取页面', exact: true }).click();
   const range = page.getByRole('textbox', { name: '页码范围' });
   await range.fill(String(firstPages + 1));
   await execute.click();
@@ -79,7 +79,7 @@ try {
   if (firstPages >= 2) {
     await page.reload();
     await uploadAndProbe(pdf('split.pdf'));
-    await page.getByRole('button', { name: '拆分', exact: true }).click();
+    await page.getByRole('link', { name: '拆分', exact: true }).click();
     await range.fill('1,2');
     const filenames = [];
     page.on('download', (item) => filenames.push(item.suggestedFilename()));

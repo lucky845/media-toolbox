@@ -58,10 +58,10 @@ export function DropZone({ accept, multiple = true, onFiles, onPick, disabled }:
         }
       }}
     >
-      <div style={{ fontSize: 15, marginBottom: 6 }}>
-        {dragging ? '松开以添加文件' : '拖放文件到这里，或点击选择'}
-      </div>
-      <div className="hint">支持 {accept} · 文件不会离开本机</div>
+      <span className="dropzone-mark" aria-hidden="true"><span>+</span></span>
+      <span className="dropzone-title">{dragging ? '松开以添加文件' : '选择文件'}</span>
+      <span className="dropzone-formats">{accept.replaceAll('.', '').replaceAll(',', ' / ').toUpperCase()}</span>
+      <span className="hint">也可以拖放到这里</span>
       {/*
         这个 input 是「原生文件选择」的兜底通道：
         - 点击区块时优先走 onPick（由 Backend 决定用 input 还是系统对话框）；

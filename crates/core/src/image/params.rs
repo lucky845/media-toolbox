@@ -350,6 +350,15 @@ impl Default for Rgba8 {
     }
 }
 
+/// 居中扩展画布，保留图片像素尺寸。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanvasFill {
+    pub width: u32,
+    pub height: u32,
+    pub background: Rgba8,
+}
+
 /// 图片处理参数。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -364,6 +373,8 @@ pub struct ImageParams {
     pub flip: Flip,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adjust: Option<Adjust>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canvas: Option<CanvasFill>,
     #[serde(default = "default_true")]
     pub apply_exif_orientation: bool,
     #[serde(default)]
@@ -382,6 +393,7 @@ impl Default for ImageParams {
             rotate: Rotation::None,
             flip: Flip::None,
             adjust: None,
+            canvas: None,
             apply_exif_orientation: true,
             background: Rgba8::default(),
         }
@@ -400,6 +412,11 @@ impl ImageParams {
         if let Some(a) = &self.adjust {
             a.validate()?;
         }
+        if let Some(canvas) = self.canvas {
+            if canvas.width == 0 || canvas.height == 0 {
+                return Err(media_ports::ToolError::invalid("画布宽度和高度必须大于 0"));
+            }
+        }
         Ok(())
     }
 
@@ -407,6 +424,7 @@ impl ImageParams {
     pub fn is_passthrough(&self) -> bool {
         self.resize.is_none()
             && self.crop.is_none()
+            && self.canvas.is_none()
             && self.rotate == Rotation::None
             && self.flip == Flip::None
             && self.adjust.as_ref().is_none_or(|a| a.is_identity())
