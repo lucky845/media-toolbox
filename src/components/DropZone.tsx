@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type DragEvent } from 'react';
-import type { DragDropEvent } from '@tauri-apps/api/webview';
-import type { InputRef } from '../lib/backend/types';
+import { listenNativeFileDrop } from '../lib/backend';
+import type { NativeDropPayload, InputRef } from '../lib/backend/types';
 
 interface Props {
   accept: string;
@@ -40,12 +40,13 @@ export function DropZone({ accept, multiple = true, onFiles, onNativeFiles, onPi
     setDragging(false);
   };
 
-  const onNativeDrag = useEffectEvent((payload: DragDropEvent) => {
+  const onNativeDrag = useEffectEvent((payload: NativeDropPayload) => {
     if (payload.type === 'leave') {
       resetDrag();
       return;
     }
     // Tauri reports physical pixels; DOM hit testing expects CSS pixels.
+    if (!payload.position) return;
     const x = payload.position.x / window.devicePixelRatio;
     const y = payload.position.y / window.devicePixelRatio;
     const hit = document.elementFromPoint(x, y);
@@ -56,7 +57,7 @@ export function DropZone({ accept, multiple = true, onFiles, onNativeFiles, onPi
     }
     resetDrag();
     if (!inside || disabled) return;
-    const files = payload.paths.flatMap((path) => {
+    const files = (payload.paths ?? []).flatMap((path) => {
       const name = path.split(/[\\/]/).pop() ?? '';
       return name && matchesAccept(accept, name) ? [{ path, name, size: 0 }] : [];
     });
@@ -69,9 +70,8 @@ export function DropZone({ accept, multiple = true, onFiles, onNativeFiles, onPi
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
-        const { getCurrentWebview } = await import('@tauri-apps/api/webview');
         if (disposed) return;
-        const stop = await getCurrentWebview().onDragDropEvent(({ payload }) => {
+        const stop = await listenNativeFileDrop((payload) => {
           if (!disposed) onNativeDrag(payload);
         });
         if (disposed) stop();
