@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ImageMeta } from '../../lib/backend/types';
-import { buildParams, canvasError, defaultForm, normalizeImageSection } from './form';
+import {
+  buildParams,
+  canvasError,
+  colorPresetAdjust,
+  compressionPresetQuality,
+  defaultForm,
+  normalizeImageSection,
+} from './form';
 
 const meta: ImageMeta = {
   width: 400,
@@ -61,6 +68,12 @@ describe('image form sections', () => {
     expect(all.resize?.width).toBe(100);
     expect(all.adjust?.brightness).toBe(1.5);
     expect(all.canvas?.width).toBe(300);
+  });
+
+  it('provides JPEG compression and color presets', () => {
+    expect(compressionPresetQuality).toEqual({ compact: 68, balanced: 82, quality: 94 });
+    expect(colorPresetAdjust('grayscale')).toEqual({ brightness: 1, contrast: 1, saturation: 0 });
+    expect(colorPresetAdjust('original')).toBeNull();
   });
 
   it('validates enabled canvas dimensions and pixel cap', () => {

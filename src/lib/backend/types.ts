@@ -36,7 +36,7 @@ export interface ToolError {
   logId?: string;
 }
 
-export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'avif' | 'gif' | 'bmp' | 'tiff';
+export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'avif' | 'gif' | 'bmp' | 'tiff' | 'qoi' | 'ico';
 
 export type Filter = 'nearest' | 'triangle' | 'catmull_rom' | 'gaussian' | 'lanczos3';
 export type ResizeMode = 'fit' | 'fill' | 'exact';

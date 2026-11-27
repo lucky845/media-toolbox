@@ -13,7 +13,7 @@
 | 应用代码（features/store/components 拆包） | 约 220 KB | 约 70 KB | 约 58 KB **[推算]** | Vite build | 首屏 + 按路由懒加载 |
 | CSS | 约 45 KB | 约 9 KB | 约 7 KB **[推算]** | Vite build | 首屏 |
 | `index.html` + manifest + 图标 | 约 30 KB | 约 12 KB | — **[推算]** | 手写 | 首屏 |
-| **`core-image.wasm`**（image+color，jpeg/png/webp/gif/bmp/tiff） | **1254 KB [实测]** | **390 KB [实测]** | **307 KB [实测]** | `crates/wasm --features image` | 进入图片页时 |
+| **`core-image.wasm`**（image+color，JPEG/PNG/WebP/GIF/BMP/TIFF/QOI/ICO） | **1208 KB [v0.2.3 实测]** | **419 KB [v0.2.3 实测]** | **326 KB [v0.2.3 实测]** | `crates/wasm --features image`，启用 QOI/ICO | 进入图片页时 |
 | **`core-doc.wasm`**（lopdf 结构操作） | 约 1.5 MB | 约 0.55 MB | **约 0.45 MB [待测]** | `crates/wasm --features doc` | 进入 PDF 编辑时 |
 | `pdf.js`（`pdf.min.mjs` + `pdf.worker.min.mjs`） | **1.748 MB [实测]**（474+1272 KB） | **516 KB [实测]**（137+380 KB） | **424 KB [实测]**（113+311 KB） | `pdfjs-dist 6.5.438` | 进入 PDF 渲染时（主线程动态 import） |
 | pdf.js 标准字体 10 个 `.pfb`（`standard_fonts/`） | 约 1.3 MB **[实测目录]** | — | 低（PFB 已压缩） | `pdfjs-dist/standard_fonts`，构建期拷入 `dist/pdfjs/` | 渲染未嵌入标准字体的 PDF 时；SW 全量预缓存 |
@@ -28,12 +28,12 @@
 
 | 口径 | 原始 | 首访传输（br） |
 |---|---|---|
-| **Phase 1 实测（只有图片功能）** | **1.51 MB** | **约 0.39 MB** |
+| 图片 wasm 优化构建（v0.2.3 实测） | **约 1.21 MB** | **约 0.33 MB brotli** |
 | 全部功能（Phase 4 完成后推算） | 约 14.6 MB | 约 2.0 MB |
 | 含可选 ffmpeg（在站点上，但懒加载） | 约 45.6 MB | 同上（不点不下载） |
 
-对照 Pages 上限 1 GB：Phase 1 占 **0.15%**，全部功能占 1.5%。结论：**体积从来不是约束**，
-哪怕把 AVIF（+1.5–2 MB br）和 oxipng（+0.3–0.6 MB br）都塞进 wasm 也远没到上限。
+对照 Pages 上限 1 GB：图片 wasm 优化构建占约 **0.12%**，全部功能估算占 1.5%。结论：**体积从来不是约束**。
+当前图片 wasm 启用 QOI 与 ICO；AVIF 编码和 oxipng 未启用，因此不是本版本的编码能力。
 
 > 实测比估算小 5–10 倍。估算偏保守的原因是「把所有可能的功能都算进首屏」，
 > 而实际的分包懒加载让首屏只含外壳。这条差异已记入 `docs/benchmarks.md`。
@@ -71,13 +71,13 @@
 | 画像 | 下载内容 | 单次流量 |
 |---|---|---|
 | A. 只逛首页就走 | 外壳 | 约 0.12 MB |
-| B. 用图片压缩（最常见） | 外壳 + core-image.wasm | 约 1.17 MB |
+| B. 用图片压缩（最常见） | 外壳 + core-image.wasm | 依实际缓存资源计算 |
 | C. 图片 + PDF + 文档（重度） | 外壳 + image + doc + pdf.js + mammoth/pdf-lib | 约 2.43 MB |
 | D. C + 用了 ffmpeg.wasm 降级 | C + 9.7 MB | 约 12.1 MB |
 
 ### 3.2 可承载的首访量
 
-按 **Phase 1 实测**口径（只用图片功能 = 0.39 MB）：
+按 **v0.2.3 图片 wasm 实测**口径（优化构建 Brotli = 0.33 MB；完整入口与其他资源另计）：
 
 ```
 100 GB = 102 400 MB
@@ -163,7 +163,7 @@ Pages 全站 `Cache-Control: max-age=600`（10 分钟）**[实测]**，也就是
 
 ## 6. 需要 Phase 1/2 用真实构建替换的「待测」项
 
-1. `core-image.wasm` 的 brotli 体积（决定 AVIF/oxipng 是否进 Web）。
+1. 继续监测 `core-image.wasm` 的 Brotli 体积；当前版本启用 QOI/ICO，AVIF/oxipng 未启用。
 2. `core-doc.wasm` 的体积（lopdf 的实际开销）。
 3. pdf.js 的 10 个标准字体（约 1.3 MB raw）由构建脚本全量拷入并进 SW 预缓存；
    首次访问 PDF 渲染功能时已随 SW install 下载，后续回访零流量。

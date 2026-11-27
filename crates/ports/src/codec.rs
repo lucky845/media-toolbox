@@ -16,6 +16,8 @@ pub enum ImageFormat {
     Gif,
     Bmp,
     Tiff,
+    Qoi,
+    Ico,
 }
 
 impl ImageFormat {
@@ -28,6 +30,8 @@ impl ImageFormat {
             ImageFormat::Gif => "gif",
             ImageFormat::Bmp => "bmp",
             ImageFormat::Tiff => "tiff",
+            ImageFormat::Qoi => "qoi",
+            ImageFormat::Ico => "ico",
         }
     }
 
@@ -40,6 +44,8 @@ impl ImageFormat {
             ImageFormat::Gif => "image/gif",
             ImageFormat::Bmp => "image/bmp",
             ImageFormat::Tiff => "image/tiff",
+            ImageFormat::Qoi => "image/qoi",
+            ImageFormat::Ico => "image/x-icon",
         }
     }
 
@@ -52,6 +58,8 @@ impl ImageFormat {
                 | ImageFormat::Avif
                 | ImageFormat::Gif
                 | ImageFormat::Tiff
+                | ImageFormat::Qoi
+                | ImageFormat::Ico
         )
     }
 
@@ -96,23 +104,19 @@ pub struct WebCodecs;
 
 impl CodecProvider for WebCodecs {
     fn formats(&self) -> CodecFormats {
+        let formats = vec![
+            ImageFormat::Jpeg,
+            ImageFormat::Png,
+            ImageFormat::Webp,
+            ImageFormat::Gif,
+            ImageFormat::Bmp,
+            ImageFormat::Tiff,
+            ImageFormat::Qoi,
+            ImageFormat::Ico,
+        ];
         CodecFormats {
-            image_decode: vec![
-                ImageFormat::Jpeg,
-                ImageFormat::Png,
-                ImageFormat::Webp,
-                ImageFormat::Gif,
-                ImageFormat::Bmp,
-                ImageFormat::Tiff,
-            ],
-            image_encode: vec![
-                ImageFormat::Jpeg,
-                ImageFormat::Png,
-                ImageFormat::Webp,
-                ImageFormat::Gif,
-                ImageFormat::Bmp,
-                ImageFormat::Tiff,
-            ],
+            image_decode: formats.clone(),
+            image_encode: formats,
             avif_enabled: false,
             png_optimize: false,
         }
@@ -124,28 +128,7 @@ pub struct DesktopCodecs;
 
 impl CodecProvider for DesktopCodecs {
     fn formats(&self) -> CodecFormats {
-        CodecFormats {
-            image_decode: vec![
-                ImageFormat::Jpeg,
-                ImageFormat::Png,
-                ImageFormat::Webp,
-                ImageFormat::Avif,
-                ImageFormat::Gif,
-                ImageFormat::Bmp,
-                ImageFormat::Tiff,
-            ],
-            image_encode: vec![
-                ImageFormat::Jpeg,
-                ImageFormat::Png,
-                ImageFormat::Webp,
-                ImageFormat::Avif,
-                ImageFormat::Gif,
-                ImageFormat::Bmp,
-                ImageFormat::Tiff,
-            ],
-            avif_enabled: true,
-            png_optimize: true,
-        }
+        WebCodecs.formats()
     }
 }
 
@@ -212,7 +195,14 @@ mod tests {
     fn format_lookup_is_consistent() {
         assert!(WebCodecs.formats().can_encode(ImageFormat::Jpeg));
         assert!(!WebCodecs.formats().can_encode(ImageFormat::Avif));
-        assert!(DesktopCodecs.formats().can_encode(ImageFormat::Avif));
+        for capabilities in [WebCodecs.formats(), DesktopCodecs.formats()] {
+            for format in [ImageFormat::Qoi, ImageFormat::Ico] {
+                assert!(capabilities.can_encode(format));
+                assert!(capabilities.can_decode(format));
+            }
+            assert!(!capabilities.can_encode(ImageFormat::Avif));
+            assert!(!capabilities.can_decode(ImageFormat::Avif));
+        }
     }
 
     #[test]

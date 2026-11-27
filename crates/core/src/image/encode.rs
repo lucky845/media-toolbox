@@ -29,11 +29,44 @@ pub fn encode(img: &RasterImage, opts: &EncodeOptions) -> Result<Vec<u8>> {
         ImageFormat::Gif => encode_gif(img),
         ImageFormat::Bmp => encode_bmp(img),
         ImageFormat::Tiff => encode_tiff(img),
+        ImageFormat::Qoi => encode_qoi(img),
+        ImageFormat::Ico => encode_ico(img),
         ImageFormat::Avif => Err(
             ToolError::new(ErrorCode::CodecUnsupported, &[("codec", "AVIF")])
                 .with_detail("当前构建未启用 avif feature（体积预算，见 docs/BUDGET.md）"),
         ),
     }
+}
+
+fn encode_qoi(img: &RasterImage) -> Result<Vec<u8>> {
+    use image::ImageEncoder;
+    let mut out = Vec::new();
+    image::codecs::qoi::QoiEncoder::new(&mut out)
+        .write_image(
+            &img.data,
+            img.width,
+            img.height,
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(enc_err)?;
+    Ok(out)
+}
+
+fn encode_ico(img: &RasterImage) -> Result<Vec<u8>> {
+    use image::ImageEncoder;
+    if !(1..=256).contains(&img.width) || !(1..=256).contains(&img.height) {
+        return Err(ToolError::invalid("ICO 输出宽和高均须为 1–256 像素"));
+    }
+    let mut out = Vec::new();
+    image::codecs::ico::IcoEncoder::new(&mut out)
+        .write_image(
+            &img.data,
+            img.width,
+            img.height,
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(enc_err)?;
+    Ok(out)
 }
 
 fn enc_err(e: impl std::fmt::Display) -> ToolError {
@@ -180,6 +213,8 @@ pub fn estimate_output_bytes(input_bytes: u64, opts: &EncodeOptions) -> u64 {
         ImageFormat::Bmp => 1.0,
         ImageFormat::Tiff => 0.9,
         ImageFormat::Avif => 0.05 + 0.3 * q.powf(1.5),
+        ImageFormat::Qoi => 1.0,
+        ImageFormat::Ico => 1.0,
     };
     (input_bytes as f64 * factor) as u64
 }
