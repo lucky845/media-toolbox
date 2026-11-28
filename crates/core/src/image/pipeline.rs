@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn identity_geometry_keeps_the_original_pixel_allocation() {
-        let img = RasterImage::new(2, 2, vec![1, 2, 3, 4].repeat(4)).unwrap();
+        let img = RasterImage::new(2, 2, [1, 2, 3, 4].repeat(4)).unwrap();
         let ptr = img.data.as_ptr();
         let out = transform_geometry(img, Rotation::None, Flip::None).unwrap();
         assert_eq!(out.data.as_ptr(), ptr);
