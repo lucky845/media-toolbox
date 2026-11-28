@@ -260,9 +260,11 @@ pub fn pdf_encrypt(src: &[u8], password: &str, limits: &Limits) -> Result<Vec<u8
         owner_password: password,
         user_password: password,
         permissions: Permissions::all(),
-    }).map_err(|_| ToolError::invalid("无法使用此密码加密 PDF"))?;
+    })
+    .map_err(|_| ToolError::invalid("无法使用此密码加密 PDF"))?;
     doc.version = "2.0".into();
-    doc.encrypt(&state).map_err(|_| ToolError::internal("无法加密 PDF"))?;
+    doc.encrypt(&state)
+        .map_err(|_| ToolError::internal("无法加密 PDF"))?;
     save_to_bytes(&mut doc)
 }
 
@@ -273,14 +275,16 @@ pub fn pdf_decrypt(src: &[u8], password: &str, limits: &Limits) -> Result<Vec<u8
     if !encrypted {
         return Err(ToolError::invalid("PDF 未加密"));
     }
-    let mut doc = lopdf::Document::load_mem_with_options(
-        src,
-        lopdf::LoadOptions::with_password(password),
-    )
-    .map_err(|error| match error {
-        lopdf::Error::InvalidPassword => ToolError::invalid("密码不正确或 PDF 加密方式不受支持"),
-        other => ToolError::new(ErrorCode::DecodeFailed, &[]).with_detail(other.to_string()),
-    })?;
+    let mut doc =
+        lopdf::Document::load_mem_with_options(src, lopdf::LoadOptions::with_password(password))
+            .map_err(|error| match error {
+                lopdf::Error::InvalidPassword => {
+                    ToolError::invalid("密码不正确或 PDF 加密方式不受支持")
+                }
+                other => {
+                    ToolError::new(ErrorCode::DecodeFailed, &[]).with_detail(other.to_string())
+                }
+            })?;
     if !doc.was_encrypted() {
         return Err(ToolError::invalid("PDF 未加密"));
     }
@@ -304,7 +308,11 @@ pub fn pdf_reorder(src: &[u8], order: &[u32], limits: &Limits) -> Result<Vec<u8>
     let mut seen = vec![false; ids.len()];
     let mut kids = Vec::with_capacity(ids.len());
     for &page in order {
-        let Some(index) = page.checked_sub(1).map(|n| n as usize).filter(|&n| n < ids.len()) else {
+        let Some(index) = page
+            .checked_sub(1)
+            .map(|n| n as usize)
+            .filter(|&n| n < ids.len())
+        else {
             return Err(ToolError::invalid("排序包含无效页码"));
         };
         if std::mem::replace(&mut seen[index], true) {
@@ -312,14 +320,20 @@ pub fn pdf_reorder(src: &[u8], order: &[u32], limits: &Limits) -> Result<Vec<u8>
         }
         kids.push(lopdf::Object::Reference(ids[index]));
     }
-    let root = doc.catalog().and_then(|catalog| catalog.get(b"Pages")).and_then(lopdf::Object::as_reference)
+    let root = doc
+        .catalog()
+        .and_then(|catalog| catalog.get(b"Pages"))
+        .and_then(lopdf::Object::as_reference)
         .map_err(|_| ToolError::invalid("PDF 页面树无效"))?;
     let tree_error = |_| ToolError::invalid("PDF 页面树无效");
     for id in ids {
         let mut parent = id;
         let mut inherited = lopdf::Dictionary::new();
         for _ in 0..64 {
-            let node = doc.get_object(parent).and_then(lopdf::Object::as_dict).map_err(tree_error)?;
+            let node = doc
+                .get_object(parent)
+                .and_then(lopdf::Object::as_dict)
+                .map_err(tree_error)?;
             for key in [b"Resources".as_slice(), b"MediaBox", b"CropBox", b"Rotate"] {
                 if !inherited.has(key) {
                     if let Ok(value) = node.get(key) {
@@ -327,19 +341,30 @@ pub fn pdf_reorder(src: &[u8], order: &[u32], limits: &Limits) -> Result<Vec<u8>
                     }
                 }
             }
-            if parent == root { break; }
-            parent = node.get(b"Parent").and_then(lopdf::Object::as_reference).map_err(tree_error)?;
+            if parent == root {
+                break;
+            }
+            parent = node
+                .get(b"Parent")
+                .and_then(lopdf::Object::as_reference)
+                .map_err(tree_error)?;
         }
         if parent != root {
             return Err(ToolError::invalid("PDF 页面树过深或包含循环"));
         }
-        let page = doc.get_object_mut(id).and_then(lopdf::Object::as_dict_mut).map_err(tree_error)?;
+        let page = doc
+            .get_object_mut(id)
+            .and_then(lopdf::Object::as_dict_mut)
+            .map_err(tree_error)?;
         for (key, value) in inherited.iter() {
             page.set(key.clone(), value.clone());
         }
         page.set("Parent", lopdf::Object::Reference(root));
     }
-    let pages = doc.get_object_mut(root).and_then(lopdf::Object::as_dict_mut).map_err(tree_error)?;
+    let pages = doc
+        .get_object_mut(root)
+        .and_then(lopdf::Object::as_dict_mut)
+        .map_err(tree_error)?;
     pages.set("Count", kids.len() as i64);
     pages.set("Kids", lopdf::Object::Array(kids));
     save_to_bytes(&mut doc)
@@ -712,9 +737,15 @@ mod tests {
         let source = make_pdf(3);
         let output = pdf_reorder(&source, &[3, 1, 2], &Limits::WEB).unwrap();
         let text = pdf_extract_text(&output, &PageSelector::all(), &Limits::WEB).unwrap();
-        assert_eq!(text.lines().map(str::trim).collect::<Vec<_>>(), ["Page 3", "Page 1", "Page 2"]);
+        assert_eq!(
+            text.lines().map(str::trim).collect::<Vec<_>>(),
+            ["Page 3", "Page 1", "Page 2"]
+        );
         for order in [&[1, 1, 3][..], &[1, 2][..], &[0, 2, 3][..]] {
-            assert_eq!(pdf_reorder(&source, order, &Limits::WEB).unwrap_err().code, ErrorCode::InvalidParams);
+            assert_eq!(
+                pdf_reorder(&source, order, &Limits::WEB).unwrap_err().code,
+                ErrorCode::InvalidParams
+            );
         }
     }
 
@@ -726,7 +757,10 @@ mod tests {
         assert!(pdf_decrypt(&locked, "wrong", &Limits::WEB).is_err());
         let unlocked = pdf_decrypt(&locked, "test-password", &Limits::WEB).unwrap();
         assert!(!probe_pdf(&unlocked).unwrap().encrypted);
-        assert_eq!(pdf_extract_text(&unlocked, &PageSelector::all(), &Limits::WEB).unwrap(), "Page 1\nPage 2\n");
+        assert_eq!(
+            pdf_extract_text(&unlocked, &PageSelector::all(), &Limits::WEB).unwrap(),
+            "Page 1\nPage 2\n"
+        );
         assert!(pdf_encrypt(&source, "", &Limits::WEB).is_err());
     }
 

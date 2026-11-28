@@ -10,6 +10,5 @@ pub mod ops;
 #[cfg(feature = "pdf")]
 pub use ops::{
     pdf_decrypt, pdf_encrypt, pdf_extract_images, pdf_extract_pages, pdf_extract_text, pdf_merge,
-    pdf_reorder, pdf_rotate, pdf_split,
-    probe_pdf, PageRange, PageSelector, PdfMeta,
+    pdf_reorder, pdf_rotate, pdf_split, probe_pdf, PageRange, PageSelector, PdfMeta,
 };
