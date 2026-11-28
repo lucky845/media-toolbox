@@ -8,7 +8,8 @@
 
 import { rolldown } from 'rolldown';
 import { resolve, join } from 'node:path';
-import { mkdir, writeFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 
 const repo = resolve(import.meta.dirname, '..');
 const outdir = join(repo, 'dist');
@@ -39,8 +40,13 @@ const extraAssets = files
 // 代价：新访客多下约 307 KB —— 但进入图片页本来就要下，净增为 0。
 const wasmDir = join(outdir, 'wasm');
 const { readdir: readDir2 } = await import('node:fs/promises');
-const wasmFiles = (await readDir2(wasmDir)).filter((f) => /core_(image|doc).*\.(js|wasm)$/.test(f));
-for (const f of wasmFiles) extraAssets.push(`wasm/${f}`);
+const wasmEntries = await readDir2(wasmDir, { withFileTypes: true });
+for (const entry of wasmEntries) {
+  if (!entry.isDirectory() || !/^[0-9a-f]{16}$/.test(entry.name)) continue;
+  for (const file of await readDir2(join(wasmDir, entry.name))) {
+    if (/^core_(image|doc)(?:_bg)?\.(js|wasm)$/.test(file)) extraAssets.push(`wasm/${entry.name}/${file}`);
+  }
+}
 
 // pdf.js 运行时（由 scripts/copy-pdfjs.mjs 拷进 dist/pdfjs）：
 // 必须进预缓存，否则离线时 getDocument 找不到 workerSrc / 标准字体，预览直接失败。
@@ -58,7 +64,11 @@ try {
 }
 
 // 注入全局常量（base 相对路径）
-const injection = `self.__MT_EXTRA_ASSETS__=${JSON.stringify(extraAssets)};\n`;
+extraAssets.sort();
+const digest = createHash('sha256').update(code).update(JSON.stringify(extraAssets));
+digest.update(await readFile(join(outdir, 'index.html')));
+const version = digest.digest('hex').slice(0, 16);
+const injection = `self.__MT_CACHE_VERSION__=${JSON.stringify(version)};self.__MT_EXTRA_ASSETS__=${JSON.stringify(extraAssets)};\n`;
 code = injection + code;
 
 await writeFile(join(outdir, 'sw.js'), code, 'utf8');

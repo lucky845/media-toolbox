@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import { getBackend } from '../lib/backend';
-import type { EncodeOptions, ImageParams, InputRef, Progress, RunOptions, TaskPayload, TaskResult, ToolError } from '../lib/backend/types';
+import type { Backend, EncodeOptions, ImageParams, InputRef, Progress, RunOptions, TaskPayload, TaskResult, ToolError } from '../lib/backend/types';
 import { fallbackMessage, isToolError } from '../lib/errors';
 import { recordTask } from './recent';
 
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+type SaveOutcome = Awaited<ReturnType<Backend['saveOutput']>>;
+type OutputSaveState = 'saving' | Exclude<SaveOutcome, 'cancelled'>;
 type Runner = (task: TaskPayload, options: RunOptions) => Promise<TaskResult>;
 type Observer = Partial<Pick<RunOptions, 'signal' | 'onProgress'>>;
 
@@ -17,6 +19,7 @@ export interface QueueItem {
   outputBytes?: Uint8Array;
   outputName?: string;
   error?: ToolError;
+  outputSaveStates?: Readonly<Partial<Record<number, OutputSaveState>>>;
   attempt: number;
 }
 
@@ -28,7 +31,8 @@ interface QueueState {
   submit: (task: TaskPayload, observer?: Observer, runner?: Runner) => Promise<TaskResult>;
   cancel: (id: string) => void;
   retry: (id: string) => void;
-  remove: (id: string) => void;
+  saveOutput: (id: string, index: number) => Promise<SaveOutcome>;
+  remove: (id: string) => boolean;
   setPaused: (paused: boolean) => void;
   setConcurrency: (concurrency: number) => void;
   clearFinished: (kind?: TaskPayload['kind']) => void;
@@ -66,8 +70,30 @@ export function isActive(item: QueueItem): boolean {
   return item.status === 'queued' || item.status === 'running';
 }
 
-export function canRetryTask(task: TaskPayload) {
+function supportsRetry(task: TaskPayload) {
   return task.kind !== 'pdf.encrypt' && task.kind !== 'pdf.decrypt';
+}
+
+export function canRetryItem(item: QueueItem): boolean {
+  return supportsRetry(item.task) && (item.status === 'cancelled' || (item.status === 'failed' && item.error?.retryable === true));
+}
+
+export function taskOutputs(result?: TaskResult) {
+  if (!result) return [];
+  // An empty list of native paths does not mean that bytes were saved.
+  if (result.savedOutputs?.length) return [];
+  return result.outputs ?? [{ name: result.outputName, bytes: result.bytes }];
+}
+
+export function hasPendingOutputs(item: QueueItem): boolean {
+  return item.status === 'succeeded' && taskOutputs(item.result).some((output, index) => {
+    const state = item.outputSaveStates?.[index];
+    return output.bytes.length > 0 && state !== 'saved' && state !== 'downloaded';
+  });
+}
+
+export function canClearItem(item: QueueItem): boolean {
+  return !isActive(item) && !hasPendingOutputs(item);
 }
 
 const cancelled: ToolError = { code: 'CANCELLED', message: '任务已取消', retryable: true, desktopHint: false };
@@ -95,7 +121,7 @@ export const useQueue = create<QueueState>((set, get) => {
     if (!job) return;
     // Release the slot and detach page callbacks before publishing the terminal state.
     job.detach?.();
-    if (outcome === 'succeeded' || !canRetryTask(item.task)) jobs.delete(item.id);
+    if (outcome === 'succeeded' || !supportsRetry(item.task) || (outcome === 'failed' && error?.retryable !== true)) jobs.delete(item.id);
     else jobs.set(item.id, { runner: job.runner });
     update(item.id, {
       status: outcome,
@@ -195,16 +221,33 @@ export const useQueue = create<QueueState>((set, get) => {
     },
     retry: (id) => {
       const item = get().items.find((entry) => entry.id === id);
-      if (!item || !canRetryTask(item.task) || (item.status !== 'failed' && item.status !== 'cancelled') || item.attempt >= 3) return;
+      if (!item || !canRetryItem(item) || item.attempt >= 3) return;
       jobs.set(id, { runner: jobs.get(id)?.runner });
       update(id, { status: 'queued', attempt: item.attempt + 1, progress: null, error: undefined });
       pump();
     },
+    saveOutput: async (id, index) => {
+      const item = get().items.find((entry) => entry.id === id);
+      if (!item || item.status !== 'succeeded' || Object.values(item.outputSaveStates ?? {}).includes('saving')) return 'cancelled';
+      const output = taskOutputs(item.result)[index];
+      if (!output?.bytes.length || item.outputSaveStates?.[index]) return 'cancelled';
+      const previous = item.outputSaveStates;
+      update(id, { outputSaveStates: { ...previous, [index]: 'saving' } });
+      try {
+        const outcome = await (await getBackend()).saveOutput(output.bytes, output.name);
+        update(id, { outputSaveStates: outcome === 'cancelled' ? previous : { ...previous, [index]: outcome } });
+        return outcome;
+      } catch (error) {
+        update(id, { outputSaveStates: previous });
+        throw error;
+      }
+    },
     remove: (id) => {
       const item = get().items.find((entry) => entry.id === id);
-      if (!item || isActive(item)) return;
+      if (!item || isActive(item) || Object.values(item.outputSaveStates ?? {}).includes('saving')) return false;
       jobs.delete(id);
       set((state) => ({ items: state.items.filter((entry) => entry.id !== id) }));
+      return true;
     },
     setPaused: (paused) => {
       set({ paused });
@@ -222,7 +265,7 @@ export const useQueue = create<QueueState>((set, get) => {
     },
     clearFinished: (kind) => {
       const items = get().items.filter((item) => {
-        if (isActive(item) || (kind && item.task.kind !== kind)) return true;
+        if (!canClearItem(item) || (kind && item.task.kind !== kind)) return true;
         jobs.delete(item.id);
         return false;
       });

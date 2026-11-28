@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -9,10 +11,37 @@ const here = dirname(fileURLToPath(import.meta.url));
 //   - 自定义域 / 根路径：VITE_BASE=/ 或不设
 //   - 项目页 <user>.github.io/<repo>/：VITE_BASE=/<repo>/
 // 任何资源引用都必须走 import.meta.env.BASE_URL，禁止硬编码 "/foo.wasm"。
+function versionWasmPairs(): Plugin {
+  const versions: Record<string, string> = {};
+  const assets = new Map<string, Buffer>();
+  return {
+    name: 'version-wasm-pairs',
+    apply: 'build' as const,
+    config() {
+      for (const kind of ['image', 'doc']) {
+        const names = [`core_${kind}.js`, `core_${kind}_bg.wasm`];
+        const paths = names.map((name) => resolve(here, 'public/wasm', name));
+        // Desktop CI uses native commands and does not build WASM.
+        if (!existsSync(paths[1]!)) continue;
+        const contents = paths.map((path) => readFileSync(path));
+        const digest = createHash('sha256');
+        for (const bytes of contents) digest.update(bytes);
+        const version = digest.digest('hex').slice(0, 16);
+        versions[kind] = version;
+        names.forEach((name, i) => assets.set(`wasm/${version}/${name}`, contents[i]!));
+      }
+      return { define: { __MT_WASM_VERSIONS__: JSON.stringify(versions) } };
+    },
+    generateBundle() {
+      for (const [fileName, source] of assets) this.emitFile({ type: 'asset', fileName, source });
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => ({
   base: process.env.VITE_BASE ?? '/',
 
-  plugins: [react()],
+  plugins: [react(), versionWasmPairs()],
 
   resolve: {
     alias: {

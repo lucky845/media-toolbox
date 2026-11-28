@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TaskPayload, TaskResult } from '../lib/backend/types';
-import { useQueue } from './queue';
+import { hasPendingOutputs, useQueue } from './queue';
+
+const { saveOutput } = vi.hoisted(() => ({ saveOutput: vi.fn() }));
+vi.mock('../lib/backend', () => ({ getBackend: async () => ({ saveOutput }) }));
 
 const task: TaskPayload = {
   kind: 'image.process',
@@ -21,9 +24,11 @@ const result: TaskResult = {
 const reset = () => {
   const state = useQueue.getState();
   state.setPaused(false);
-  state.clearFinished();
-  for (const item of useQueue.getState().items) state.cancel(item.id);
-  state.clearFinished();
+  for (const item of useQueue.getState().items) {
+    state.cancel(item.id);
+    state.remove(item.id);
+  }
+  saveOutput.mockReset();
 };
 
 afterEach(reset);
@@ -60,5 +65,64 @@ describe('task queue recovery', () => {
     useQueue.getState().setPaused(false);
     await vi.waitFor(() => expect(useQueue.getState().items[0]?.status).toBe('succeeded'));
     expect(started).toBe(true);
+  });
+});
+
+describe('queue output protection', () => {
+  const current = () => useQueue.getState().items[0]!;
+
+  it('protects partially saved outputs, tracks actual outcomes, and clears only after both saves', async () => {
+    const queue = useQueue.getState();
+    await queue.submit(task, undefined, async () => ({
+      ...result,
+      outputs: [{ name: 'same.png', bytes: result.bytes }, { name: 'same.png', bytes: result.bytes }],
+    }));
+    const { id } = current();
+    queue.clearFinished(task.kind);
+    expect(current().id).toBe(id);
+
+    saveOutput.mockResolvedValueOnce('cancelled').mockResolvedValueOnce('saved').mockResolvedValueOnce('downloaded');
+    await expect(queue.saveOutput(id, 0)).resolves.toBe('cancelled');
+    expect(current().outputSaveStates).toBeUndefined();
+    await expect(queue.saveOutput(id, 0)).resolves.toBe('saved');
+    queue.clearFinished();
+    expect(current().outputSaveStates).toEqual({ 0: 'saved' });
+    expect(hasPendingOutputs(current())).toBe(true);
+    await expect(queue.saveOutput(id, 1)).resolves.toBe('downloaded');
+    expect(current().outputSaveStates).toEqual({ 0: 'saved', 1: 'downloaded' });
+    queue.clearFinished();
+    expect(current()).toBeUndefined();
+  });
+
+  it('retains a result on save errors and blocks removal during an in-flight save', async () => {
+    const queue = useQueue.getState();
+    await queue.submit(task, undefined, async () => result);
+    const { id } = current();
+    const error = new Error('not written');
+    saveOutput.mockRejectedValueOnce(error);
+    const saving = queue.saveOutput(id, 0);
+    expect(queue.remove(id)).toBe(false);
+    queue.clearFinished();
+    expect(current().id).toBe(id);
+    await expect(saving).rejects.toBe(error);
+    expect(hasPendingOutputs(current())).toBe(true);
+    expect(queue.remove(id)).toBe(true);
+  });
+
+  it('treats nonempty backend-written paths as saved', async () => {
+    const queue = useQueue.getState();
+    await queue.submit(task, undefined, async () => ({ ...result, savedOutputs: [{ name: 'test.png', path: '/out/test.png', bytes: 1 }] }));
+    expect(hasPendingOutputs(current())).toBe(false);
+    queue.clearFinished();
+    expect(current()).toBeUndefined();
+  });
+
+  it('does not restart tasks with a non-retryable error', async () => {
+    const queue = useQueue.getState();
+    const runner = vi.fn().mockRejectedValue({ code: 'INTERNAL', message: 'stop', retryable: false, desktopHint: false });
+    await expect(queue.submit(task, undefined, runner)).rejects.toMatchObject({ retryable: false });
+    queue.retry(current().id);
+    expect(current()).toMatchObject({ status: 'failed', attempt: 0 });
+    expect(runner).toHaveBeenCalledTimes(1);
   });
 });

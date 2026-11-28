@@ -461,6 +461,29 @@ export function process_stage_transform(input, params_json, on_progress) {
 }
 
 /**
+ * 体积变化文案：只计算元数据，不重新运行图片流水线。
+ * @param {number} input_bytes
+ * @param {number} output_bytes
+ * @returns {string}
+ */
+export function savings_text(input_bytes, output_bytes) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16) >>> 0;
+        wasm.savings_text(retptr, input_bytes, output_bytes);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        deferred1_0 = r0;
+        deferred1_1 = r1;
+        return getStringFromWasm0(r0, r1);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * 归一化后的采样表（与 resize 内部用的完全同一份逻辑），用于定位「权重归一化」差异。
  * @param {string} filter_name
  * @param {number} src

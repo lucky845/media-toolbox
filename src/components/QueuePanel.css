@@ -1,0 +1,6 @@
+.queue-feedback:not(:empty) { margin-bottom: 12px; }
+.queue-feedback:empty { margin: 0; }
+.queue-remove-dialog { width: min(28rem, calc(100% - 32px)); margin: auto; padding: 22px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.queue-remove-dialog:modal { overscroll-behavior: contain; }
+.queue-remove-dialog::backdrop { background: rgba(0, 0, 0, .62); overflow: hidden; overscroll-behavior: contain; }
+.queue-remove-dialog .row { justify-content: end; margin-top: 18px; }

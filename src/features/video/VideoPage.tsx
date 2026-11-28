@@ -3,9 +3,9 @@ import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { DesktopCta, LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
-import { submitTask } from '../../store/queue';
+import { submitTask, useQueue } from '../../store/queue';
 import { DESKTOP_RELEASE_URL, formatBytes } from '../../lib/errors';
-import type { InputRef, Progress, ToolError, VideoProbeResult } from '../../lib/backend/types';
+import type { InputRef, TaskPayload, ToolError, VideoProbeResult } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
 import { buildParams, defaultForm, describeParams, formatDuration, type VideoFormState } from './videoForm';
 
@@ -22,7 +22,13 @@ export function VideoPage() {
   const [form, setForm] = useState<VideoFormState>(() => defaultForm());
   const [error, setError] = useState<ToolError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [submittedTask, setSubmittedTask] = useState<TaskPayload | null>(null);
+  const item = useQueue((state) => state.items.find((entry) => entry.task === submittedTask));
+  const paused = useQueue((state) => state.paused);
+  const setPaused = useQueue((state) => state.setPaused);
+  const queued = item?.status === 'queued';
+  const running = item?.status === 'running';
+  const progress = item?.progress;
   const [result, setResult] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
 
@@ -30,7 +36,6 @@ export function VideoPage() {
     setError(null);
     setProbe(null);
     setResult(null);
-    setProgress(null);
     setFile(ref);
     setBusy(true);
     try {
@@ -62,11 +67,10 @@ export function VideoPage() {
     setBusy(true);
     const ac = new AbortController();
     controller.current = ac;
+    const task: TaskPayload = { kind: 'video.transcode', input: file, params: buildParams(form) };
+    setSubmittedTask(task);
     try {
-      const out = await submitTask(
-        { kind: 'video.transcode', input: file, params: buildParams(form) },
-        { signal: ac.signal, onProgress: setProgress },
-      );
+      const out = await submitTask(task, { signal: ac.signal });
       const backend = await getBackend();
       await backend.saveOutput(out.bytes, out.outputName);
       setResult(`已生成 ${out.outputName}（${out.bytes.length > 0 ? `${formatBytes(out.bytes.length)}，` : ''}${out.meta.savingsText}）`);
@@ -74,6 +78,7 @@ export function VideoPage() {
       setError(e as ToolError);
     } finally {
       controller.current = null;
+      setSubmittedTask(null);
       setBusy(false);
     }
   }, [file, busy, form]);
@@ -190,19 +195,24 @@ export function VideoPage() {
 
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
-      {busy && progress && (
+      <div role="status" aria-live="polite">
+        {queued && (paused ? '已排队：队列已暂停' : '已排队：等待空闲处理槽位')}
+        {running && '正在转码'}
+      </div>
+      {(queued || running) && (
         <div className="card">
           <div className="row between">
-            <span>{progress.phase} · {progress.done} / {progress.total} {progress.unit}</span>
+            {running && progress && <span>{progress.phase} · {progress.done} / {progress.total} {progress.unit}</span>}
+            {queued && paused && <button type="button" className="btn ghost" onClick={() => setPaused(false)}>继续队列</button>}
             <button type="button" className="btn ghost" onClick={cancel}>取消</button>
           </div>
-          <progress max={progress.total || 1} value={progress.done} style={{ width: '100%', marginTop: 8 }} />
+          {running && progress && <progress aria-label="视频转码进度" max={progress.total || 1} value={progress.done} style={{ width: '100%', marginTop: 8 }} />}
         </div>
       )}
 
       <div className="row">
         <button type="button" className="btn" disabled={!file || !probe || busy || !caps?.video.available || Boolean(sizeBlocked || durationBlocked)} onClick={run}>
-          {busy ? '处理中…' : '开始转码'}
+          {queued ? '排队中…' : busy ? '处理中…' : '开始转码'}
         </button>
         {result && <span className="hint">{result}</span>}
       </div>

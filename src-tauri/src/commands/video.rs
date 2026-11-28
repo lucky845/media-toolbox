@@ -227,42 +227,50 @@ pub async fn video_transcode(
         .unwrap_or_else(|| "video".into());
     let dir = src.parent().unwrap_or_else(|| std::path::Path::new("."));
     let output = dir.join(format!("{stem}-converted-{}.{}", args.task_id, container));
-    let argv = build_transcode_args(&params, &args.input_path, &output.to_string_lossy())?;
 
     let app_for_progress = app.clone();
     let task_id = args.task_id.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        run_with_progress(
-            &ffmpeg,
-            &argv,
-            probe.duration_sec,
-            &cancel,
-            &|p: Progress| {
-                let _ = app_for_progress.emit(
-                    "task://progress",
-                    serde_json::json!({
-                        "taskId": task_id,
-                        "done": p.done,
-                        "total": p.total,
-                        "phase": p.phase.as_str(),
-                        "unit": match p.unit {
-                            media_ports::progress::Unit::Bytes => "bytes",
-                            media_ports::progress::Unit::Pixels => "pixels",
-                            media_ports::progress::Unit::Pages => "pages",
-                            media_ports::progress::Unit::Frames => "frames",
-                            media_ports::progress::Unit::Percent => "percent",
-                        },
-                    }),
-                );
-            },
-        )
+    let staged_output = output.clone();
+    let ffmpeg_params = params.clone();
+    tokio::task::spawn_blocking(move || {
+        publish_video_output(&staged_output, |staged| {
+            if cancel.is_cancelled() {
+                return Err(ToolError::cancelled());
+            }
+            let argv =
+                build_transcode_args(&ffmpeg_params, &args.input_path, &staged.to_string_lossy())?;
+            let outcome = run_with_progress(
+                &ffmpeg,
+                &argv,
+                probe.duration_sec,
+                &cancel,
+                &|p: Progress| {
+                    let _ = app_for_progress.emit(
+                        "task://progress",
+                        serde_json::json!({
+                            "taskId": task_id,
+                            "done": p.done,
+                            "total": p.total,
+                            "phase": p.phase.as_str(),
+                            "unit": match p.unit {
+                                media_ports::progress::Unit::Bytes => "bytes",
+                                media_ports::progress::Unit::Pixels => "pixels",
+                                media_ports::progress::Unit::Pages => "pages",
+                                media_ports::progress::Unit::Frames => "frames",
+                                media_ports::progress::Unit::Percent => "percent",
+                            },
+                        }),
+                    );
+                },
+            )?;
+            if outcome.cancelled || cancel.is_cancelled() {
+                return Err(ToolError::cancelled());
+            }
+            Ok(())
+        })
     })
     .await
     .map_err(|e| ToolError::internal(format!("任务崩溃: {e}")))??;
-
-    if outcome.cancelled {
-        return Err(ToolError::cancelled());
-    }
 
     Ok(VideoTranscodeResult {
         output_path: output.to_string_lossy().into_owned(),
@@ -271,6 +279,29 @@ pub async fn video_transcode(
         out_height: params.height.unwrap_or(probe.height),
         duration_sec: probe.duration_sec,
     })
+}
+
+/// 仅在 FFmpeg 成功后发布文件。临时目录和输出在同一文件系统，且保留扩展名供 FFmpeg 推断格式。
+fn publish_video_output(
+    output: &std::path::Path,
+    run: impl FnOnce(&std::path::Path) -> Result<(), ToolError>,
+) -> Result<(), ToolError> {
+    let dir = output
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let filename = output
+        .file_name()
+        .ok_or_else(|| ToolError::io("无效的视频输出文件名"))?;
+    let staging = tempfile::Builder::new()
+        .prefix(".media-toolbox-video-")
+        .tempdir_in(dir)
+        .map_err(|e| ToolError::io(format!("创建视频临时目录失败: {e}")))?;
+    let staged = staging.path().join(filename);
+    run(&staged)?;
+    std::fs::rename(&staged, output)
+        .map_err(|e| ToolError::io(format!("发布视频输出失败: {e}")))?;
+    Ok(())
 }
 
 /// 抽封面帧（供未来的封面帧功能；先提供 command 骨架，参数来自 core 纯函数）。
@@ -282,8 +313,11 @@ pub fn video_extract_frame(
 ) -> Result<String, ToolError> {
     let ffmpeg = sidecar::binary_path("ffmpeg")
         .ok_or_else(|| ToolError::new(ErrorCode::BinaryMissing, &[("name", "ffmpeg")]))?;
-    let argv = build_extract_frame_args(&input_path, &output_path, at_sec);
-    run_capture(&ffmpeg, &argv)?;
+    publish_video_output(std::path::Path::new(&output_path), |staged| {
+        let argv = build_extract_frame_args(&input_path, &staged.to_string_lossy(), at_sec);
+        run_capture(&ffmpeg, &argv)?;
+        Ok(())
+    })?;
     Ok(output_path)
 }
 
@@ -292,14 +326,65 @@ pub fn video_extract_frame(
 pub fn video_extract_audio(input_path: String, output_path: String) -> Result<String, ToolError> {
     let ffmpeg = sidecar::binary_path("ffmpeg")
         .ok_or_else(|| ToolError::new(ErrorCode::BinaryMissing, &[("name", "ffmpeg")]))?;
-    let argv = build_extract_audio_args(&input_path, &output_path);
-    run_capture(&ffmpeg, &argv)?;
+    publish_video_output(std::path::Path::new(&output_path), |staged| {
+        let argv = build_extract_audio_args(&input_path, &staged.to_string_lossy());
+        run_capture(&ffmpeg, &argv)?;
+        Ok(())
+    })?;
     Ok(output_path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_publish_video_output_failure_and_cancel_leave_no_partial_file() {
+        let dir =
+            std::env::temp_dir().join(format!("mt-video-stage-failure-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let output = dir.join("converted.mp4");
+        for error in [
+            ToolError::new(ErrorCode::EncodeFailed, &[]),
+            ToolError::cancelled(),
+        ] {
+            let code = error.code;
+            let result = publish_video_output(&output, |staged| {
+                assert_eq!(staged.extension(), output.extension());
+                std::fs::write(staged, b"partial").unwrap();
+                assert!(!output.exists());
+                Err(error)
+            });
+            assert_eq!(result.unwrap_err().code, code);
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        }
+        std::fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_publish_video_output_only_replaces_existing_output_on_success() {
+        let dir =
+            std::env::temp_dir().join(format!("mt-video-stage-success-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let output = dir.join("converted.webm");
+        std::fs::write(&output, b"original").unwrap();
+        let result = publish_video_output(&output, |staged| {
+            std::fs::write(staged, b"partial").unwrap();
+            Err(ToolError::cancelled())
+        });
+        assert_eq!(result.unwrap_err().code, ErrorCode::Cancelled);
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        publish_video_output(&output, |staged| {
+            std::fs::write(staged, b"finished").unwrap();
+            assert_eq!(std::fs::read(&output).unwrap(), b"original");
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"finished");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_file(&output).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+    }
 
     #[test]
     fn select_encoder_lgpl_prefers_hardware() {

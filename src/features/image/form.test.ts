@@ -6,6 +6,7 @@ import {
   colorPresetAdjust,
   compressionPresetQuality,
   defaultForm,
+  icoSizeError,
   normalizeImageSection,
 } from './form';
 
@@ -88,4 +89,17 @@ describe('image form sections', () => {
     form.canvasEnabled = false;
     expect(canvasError(form)).toBeNull();
   });
+});
+
+it('checks ICO dimensions after orientation, rotation, crop, resize and canvas', () => {
+  const source = { ...meta, width: 320, height: 300, exifOrientation: 6 };
+  const form = defaultForm('nearest');
+  expect(icoSizeError(source, buildParams(form, source), 'ico')).toContain('300 × 320');
+  expect(icoSizeError(source, buildParams(form, source), 'gif')).toBeNull();
+  Object.assign(form, { rotate: 'cw90', cropEnabled: true, cropPct: { x: 0, y: 0, w: 100, h: 80 }, scalePercent: 80 });
+  expect(icoSizeError(source, buildParams(form, source), 'ico')).toBeNull();
+  Object.assign(form, { canvasEnabled: true, canvasWidth: '257', canvasHeight: '256' });
+  expect(icoSizeError(source, buildParams(form, source), 'ico')).toContain('257 × 256');
+  form.canvasWidth = '256';
+  expect(icoSizeError(source, buildParams(form, source), 'ico')).toBeNull();
 });

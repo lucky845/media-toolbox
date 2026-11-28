@@ -78,7 +78,10 @@ try {
 
   // 确认 MIME 真的是错的
   const ct = await page.evaluate(async () => {
-    const r = await fetch('/wasm/core_image_bg.wasm', { method: 'HEAD' });
+    const urls = (await Promise.all((await caches.keys()).map(async (name) => (await (await caches.open(name)).keys()).map((request) => request.url)))).flat();
+    const imageWasm = urls.find((url) => /\/wasm\/[a-f0-9]{16}\/core_image_bg\.wasm$/.test(url));
+    if (!imageWasm) throw new Error('Versioned image WASM missing from precache');
+    const r = await fetch(imageWasm, { method: 'HEAD' });
     return r.headers.get('content-type');
   });
   console.log(`实际 content-type: ${ct}`);
@@ -87,7 +90,7 @@ try {
   }
 
   await page.locator('input[type="file"]').setInputFiles('tests/fixtures/gradient.png');
-  await page.waitForSelector('dl.kv', { timeout: 20_000 });
+  await page.waitForSelector('dl.source-details', { timeout: 20_000 });
 
   const runBtn = page.getByRole('button', { name: '开始处理' });
   await runBtn.click();

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { DropZone } from '../../components/DropZone';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { LimitNotice } from '../../components/LimitNotice';
@@ -37,15 +37,19 @@ export function PdfPage({ action }: { action: PdfAction }) {
   const extractedText = extracted ? new TextDecoder().decode(extracted) : '';
   const [outputStatus, setOutputStatus] = useState('');
   const [probing, setProbing] = useState(false);
+  const [probeError, setProbeError] = useState<ToolError | null>(null);
   const selectionVersion = useRef(0);
   const nativePicker = useCapabilities((state) => state.caps?.fileSystem.nativeFilePicker);
 
-  const onFiles = useCallback(async (refs: InputRef[]) => {
+  const runHintId = useId();
+
+  const onFiles = useCallback(async (refs: InputRef[], keepPassword = false) => {
     const version = ++selectionVersion.current;
     setRunAction(null);
     setOrder([]);
-    setPassword('');
+    if (!keepPassword || refs.length === 0) setPassword('');
     setError(null);
+    setProbeError(null);
     setMeta(null);
     setResult(null);
     setExtracted(null);
@@ -63,7 +67,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
         setOrder(Array.from({ length: nextMeta.pages }, (_, index) => index + 1));
       }
     } catch (e) {
-      if (version === selectionVersion.current) setError(pdfError(e));
+      if (version === selectionVersion.current) setProbeError(pdfError(e));
     } finally {
       if (version === selectionVersion.current) setProbing(false);
     }
@@ -138,60 +142,60 @@ export function PdfPage({ action }: { action: PdfAction }) {
 
   const outputFileName = files[0]?.name.replace(/\.pdf$/i, '') || 'document';
 
-  const passwordValid = action === 'decrypt'
-    || (password.trim().length > 0 && new TextEncoder().encode(password).length <= 127);
-  const canRun = !!meta && !busy && !probing && action !== 'render'
-    && (passwordAction ? passwordValid && (files.length > 1 || meta.encrypted === (action === 'decrypt')) : !meta.encrypted)
-    && (action !== 'merge' || files.length > 1)
-    && (action !== 'reorder' || order.some((page, index) => page !== index + 1));
+  const passwordBatch = passwordAction && files.length > 1;
+  const ranges = useRanges ? parseRanges() : [];
+  let cannotRun: string | null = null;
+  if (busy) cannotRun = '正在处理 PDF，请稍候。';
+  else if (!first) cannotRun = '请先选择 PDF 文件。';
+  else if (probing) cannotRun = '正在读取 PDF 信息，请稍候。';
+  else if (!meta && !(passwordBatch && probeError)) cannotRun = '无法读取此 PDF，请重新选择文件。';
+  else if (action === 'encrypt' && !password.trim()) cannotRun = '请输入打开密码。';
+  else if (action === 'encrypt' && new TextEncoder().encode(password).length > 127) cannotRun = '打开密码不能超过 127 字节。';
+  else if (!passwordBatch && meta?.encrypted && action !== 'decrypt') {
+    cannotRun = action === 'encrypt' ? '此 PDF 已加密，请先移除原密码。' : '请先使用「移除密码」解密此文件。';
+  } else if (!passwordBatch && meta && !meta.encrypted && action === 'decrypt') {
+    cannotRun = '此 PDF 未加密，无需移除密码。';
+  } else if (action === 'merge' && files.length < 2) cannotRun = '合并至少需要 2 个 PDF。';
+  else if (action === 'reorder' && !order.some((page, index) => page !== index + 1)) cannotRun = '请先调整页面顺序。';
+  else if (action === 'split' && !rangeText.trim()) cannotRun = '请填写要拆分的页码范围。';
+  else if (!ranges) cannotRun = '页码范围无效，请使用如 1-3,5 的格式，并且不能超过 PDF 页数。';
 
   async function run() {
-    if (!files[0] || !canRun) return;
+    if (action === 'render' || !first || cannotRun || !ranges) return;
     setRunAction(action);
     setOutputStatus('');
     setBusy(true);
     setError(null);
     setResult(null);
     setExtracted(null);
-    const ranges = useRanges ? parseRanges() : [];
-    if (!ranges) {
-      setError({ code: 'INVALID_PARAMS', message: '页码范围无效，请使用如 1-3,5 的格式，并且不能超过 PDF 页数', retryable: false, desktopHint: false });
-      setBusy(false);
-      return;
-    }
     const selector = { ranges, oddOnly: false, evenOnly: false };
 
     let task: TaskPayload;
     switch (action) {
       case 'reorder':
-        task = { kind: 'pdf.reorder', input: files[0], order };
+        task = { kind: 'pdf.reorder', input: first, order };
         break;
       case 'encrypt':
       case 'decrypt':
-        task = { kind: action === 'encrypt' ? 'pdf.encrypt' : 'pdf.decrypt', input: files[0], password };
+        task = { kind: action === 'encrypt' ? 'pdf.encrypt' : 'pdf.decrypt', input: first, password };
         setPassword('');
         break;
       case 'rotate':
-        task = { kind: 'pdf.rotate' as const, input: files[0]!, pages: selector, degrees };
+        task = { kind: 'pdf.rotate' as const, input: first, pages: selector, degrees };
         break;
       case 'split':
-        task = { kind: 'pdf.split' as const, input: files[0]!, ranges };
+        task = { kind: 'pdf.split' as const, input: first, ranges };
         break;
       case 'extractPages':
-        task = { kind: 'pdf.extract' as const, input: files[0]!, pages: selector, what: 'pages' as const };
+        task = { kind: 'pdf.extract' as const, input: first, pages: selector, what: 'pages' as const };
         break;
       case 'extractText':
-        task = { kind: 'pdf.extract' as const, input: files[0]!, pages: selector, what: 'text' as const };
+        task = { kind: 'pdf.extract' as const, input: first, pages: selector, what: 'text' as const };
         break;
       case 'extractImages':
-        task = { kind: 'pdf.extract' as const, input: files[0]!, pages: selector, what: 'images' as const };
+        task = { kind: 'pdf.extract' as const, input: first, pages: selector, what: 'images' as const };
         break;
       case 'merge':
-        if (files.length < 2) {
-          setError({ code: 'INVALID_PARAMS', message: '合并至少需要 2 个 PDF', retryable: false, desktopHint: false });
-          setBusy(false);
-          return;
-        }
         task = { kind: 'pdf.merge' as const, inputs: files };
         break;
     }
@@ -268,7 +272,11 @@ export function PdfPage({ action }: { action: PdfAction }) {
             ))}
           </ol>
         )}
-        {probing && <p className="hint" role="status">正在读取 PDF 信息…</p>}
+        {probing && action === 'render' && <p className="hint" role="status">正在读取 PDF 信息…</p>}
+        {probeError && first && (
+          <ErrorBanner error={{ ...probeError, message: `${first.name}：${probeError.message}` }} />
+        )}
+        {probeError && passwordBatch && <p className="hint">可移除无法读取的文件，或继续处理；批次会分别报告每份文件的结果。</p>}
         {meta && (
           <dl className="kv" style={{ marginTop: 12 }}>
             <dt>页数</dt><dd className="mono">{meta.pages}</dd>
@@ -290,10 +298,19 @@ export function PdfPage({ action }: { action: PdfAction }) {
             <span className="hint">{action === 'encrypt' ? 'AES-256，最多 127 字节' : '仅限制编辑、打开时无需密码的 PDF 可留空'}</span>
           </label>
         )}
-        {files.length > 1 && action !== 'merge' && (
+        {passwordAction && files.length > 0 && (
+          <ul aria-label="批处理文件">{files.map((file, index) => (
+            <li key={index}>
+              <span className="mono">{file.name}</span>{' '}
+              <button type="button" className="ghost" disabled={busy} aria-label={`移除第 ${index + 1} 个文件 ${file.name}`}
+                onClick={() => void onFiles(files.filter((_, i) => i !== index), true)}>移除</button>
+            </li>
+          ))}</ul>
+        )}
+        {files.length > 1 && action === 'render' && (
           <ul aria-label="批处理文件">{files.map((file, index) => <li key={index}>{file.name}</li>)}</ul>
         )}
-        {meta?.encrypted && !passwordAction && <p className="hint">请先使用「移除密码」解密此文件。</p>}
+        {meta?.encrypted && action === 'render' && <p className="hint">请先使用「移除密码」解密此文件。</p>}
         {useRanges && (
           <div className="row" style={{ marginTop: 14, gap: 14 }}>
             <label className="row" style={{ gap: 8 }}>
@@ -320,9 +337,11 @@ export function PdfPage({ action }: { action: PdfAction }) {
 
         {action !== 'render' && (
           <div className="row" style={{ marginTop: 16 }}>
-            <button className="primary" onClick={run} disabled={!canRun}>
+            <button type="button" className="primary" onClick={run} disabled={cannotRun !== null}
+              aria-describedby={cannotRun ? runHintId : undefined}>
               {busy ? '处理中…' : '执行'}
             </button>
+            <span className="hint" id={runHintId} role="status">{cannotRun}</span>
           </div>
         )}
         {action === 'render' && (

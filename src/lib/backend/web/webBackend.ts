@@ -5,6 +5,7 @@
 //  - 保留一个「空闲 worker」复用，减少每次任务的 30–80 ms 启动开销。
 //  - 所有 URL 都经 `import.meta.env.BASE_URL` 拼接（规格 §16）。
 
+import { wasmPairUrls } from './wasmPairUrls';
 import { warmWasm } from './wasmLoader';
 import { getVideoBackend, videoCodecSupport } from './videoBackend';
 import { getDocBackend } from './docBackend';
@@ -31,12 +32,7 @@ import type {
 
 /** wasm 与胶水的位置：全部相对 BASE_URL，禁止硬编码绝对路径 */
 function wasmUrls(): { glue: string; wasm: string } {
-  const base = import.meta.env.BASE_URL || '/';
-  const prefix = base.endsWith('/') ? base : `${base}/`;
-  return {
-    glue: `${prefix}wasm/core_image.js`,
-    wasm: `${prefix}wasm/core_image_bg.wasm`,
-  };
+  return wasmPairUrls('image');
 }
 
 interface PendingTask {
