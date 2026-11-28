@@ -69,6 +69,24 @@ pub fn pdf_rotate(input: &[u8], selector_json: &str, degrees: i32) -> Result<Vec
 
 #[cfg(feature = "doc")]
 #[wasm_bindgen]
+pub fn pdf_reorder(input: &[u8], order: &[u32]) -> Result<Vec<u8>, JsValue> {
+    media_core::pdf::pdf_reorder(input, order, &media_ports::Limits::WEB).map_err(err_to_js)
+}
+
+#[cfg(feature = "doc")]
+#[wasm_bindgen]
+pub fn pdf_encrypt(input: &[u8], password: &str) -> Result<Vec<u8>, JsValue> {
+    media_core::pdf::pdf_encrypt(input, password, &media_ports::Limits::WEB).map_err(err_to_js)
+}
+
+#[cfg(feature = "doc")]
+#[wasm_bindgen]
+pub fn pdf_decrypt(input: &[u8], password: &str) -> Result<Vec<u8>, JsValue> {
+    media_core::pdf::pdf_decrypt(input, password, &media_ports::Limits::WEB).map_err(err_to_js)
+}
+
+#[cfg(feature = "doc")]
+#[wasm_bindgen]
 pub fn pdf_extract(
     input: &[u8],
     selector_json: &str,

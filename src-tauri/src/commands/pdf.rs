@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum PdfRequest {
     #[serde(rename = "pdf.merge")]
@@ -30,6 +30,12 @@ pub enum PdfRequest {
         degrees: i32,
         task_id: String,
     },
+    #[serde(rename = "pdf.reorder")]
+    Reorder { input_path: String, order: Vec<u32>, task_id: String },
+    #[serde(rename = "pdf.encrypt")]
+    Encrypt { input_path: String, password: String, task_id: String },
+    #[serde(rename = "pdf.decrypt")]
+    Decrypt { input_path: String, password: String, task_id: String },
     #[serde(rename = "pdf.extract")]
     Extract {
         input_path: String,
@@ -45,6 +51,9 @@ impl PdfRequest {
             Self::Merge { task_id, .. }
             | Self::Split { task_id, .. }
             | Self::Rotate { task_id, .. }
+            | Self::Reorder { task_id, .. }
+            | Self::Encrypt { task_id, .. }
+            | Self::Decrypt { task_id, .. }
             | Self::Extract { task_id, .. } => task_id,
         }
     }
@@ -204,6 +213,21 @@ fn run_pdf(
             let out = pdf::pdf_rotate(&bytes, &pages, degrees, limits)?;
             (input_path, "rotated.pdf", vec![("rotated.pdf".into(), out)])
         }
+        PdfRequest::Reorder { input_path, order, .. } => {
+            let bytes = read(&input_path, limits.max_bytes)?;
+            let output = pdf::pdf_reorder(&bytes, &order, limits)?;
+            (input_path, "reordered.pdf", vec![("reordered.pdf".into(), output)])
+        }
+        PdfRequest::Encrypt { input_path, password, .. } => {
+            let bytes = read(&input_path, limits.max_bytes)?;
+            let output = pdf::pdf_encrypt(&bytes, &password, limits)?;
+            (input_path, "encrypted.pdf", vec![("encrypted.pdf".into(), output)])
+        }
+        PdfRequest::Decrypt { input_path, password, .. } => {
+            let bytes = read(&input_path, limits.max_bytes)?;
+            let output = pdf::pdf_decrypt(&bytes, &password, limits)?;
+            (input_path, "decrypted.pdf", vec![("decrypted.pdf".into(), output)])
+        }
         PdfRequest::Extract {
             input_path,
             pages,
@@ -339,6 +363,44 @@ mod tests {
             actual,
             pdf::pdf_merge(&expected_inputs, &Limits::DESKTOP).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn reorder_and_password_operations_write_standalone_outputs() {
+        let dir = TestDir::new();
+        let source = dir.fixture();
+
+        let reordered = invoke(json!({
+            "kind": "pdf.reorder", "inputPath": source, "order": [2, 1, 3],
+            "taskId": "pdf-test-reorder"
+        }))
+        .await
+        .unwrap();
+        assert_eq!(reordered.output_name, "reordered.pdf");
+        let reordered_bytes = std::fs::read(&reordered.outputs[0].path).unwrap();
+        assert_eq!(pdf::probe_pdf(&reordered_bytes).unwrap().pages, 3);
+
+        let encrypted = invoke(json!({
+            "kind": "pdf.encrypt", "inputPath": source, "password": "native-test-pass",
+            "taskId": "pdf-test-encrypt"
+        }))
+        .await
+        .unwrap();
+        assert_eq!(encrypted.output_name, "encrypted.pdf");
+        let encrypted_bytes = std::fs::read(&encrypted.outputs[0].path).unwrap();
+        assert!(pdf::probe_pdf(&encrypted_bytes).unwrap().encrypted);
+
+        let decrypted = invoke(json!({
+            "kind": "pdf.decrypt", "inputPath": encrypted.outputs[0].path,
+            "password": "native-test-pass", "taskId": "pdf-test-decrypt"
+        }))
+        .await
+        .unwrap();
+        assert_eq!(decrypted.output_name, "decrypted.pdf");
+        let decrypted_bytes = std::fs::read(&decrypted.outputs[0].path).unwrap();
+        let metadata = pdf::probe_pdf(&decrypted_bytes).unwrap();
+        assert!(!metadata.encrypted);
+        assert_eq!(metadata.pages, 3);
     }
 
     #[tokio::test]

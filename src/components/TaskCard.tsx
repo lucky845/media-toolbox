@@ -4,7 +4,7 @@ import { ProgressBar } from './ProgressBar';
 import { getBackend } from '../lib/backend';
 import { fallbackMessage, formatBytes, isToolError } from '../lib/errors';
 import type { ToolError } from '../lib/backend/types';
-import { isActive, TASK_LABELS, taskInputs, useQueue, type QueueItem } from '../store/queue';
+import { canRetryTask, isActive, TASK_LABELS, taskInputs, useQueue, type QueueItem } from '../store/queue';
 
 const LABELS: Record<QueueItem['status'], string> = {
   queued: '排队中',
@@ -50,7 +50,7 @@ export function TaskCard({ item }: { item: QueueItem }) {
       {item.error && <ErrorBanner error={item.error} />}
       <div className="row" style={{ marginTop: 8, flexWrap: 'wrap' }}>
         {isActive(item) && <button type="button" className="ghost" onClick={() => cancel(item.id)}>取消</button>}
-        {(item.status === 'failed' || item.status === 'cancelled') && (
+        {canRetryTask(item.task) && (item.status === 'failed' || item.status === 'cancelled') && (
           <button type="button" onClick={() => retry(item.id)} disabled={item.attempt >= 3}>
             {item.attempt >= 3 ? '已达重试上限' : `重试${item.attempt ? ` (${item.attempt}/3)` : ''}`}
           </button>

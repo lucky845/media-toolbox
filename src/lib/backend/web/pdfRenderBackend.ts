@@ -31,7 +31,7 @@ interface PdfPageLike {
 interface PdfDocLike {
   numPages: number;
   getPage(n: number): Promise<PdfPageLike>;
-  destroy(): Promise<void>;
+  loadingTask: { destroy(): Promise<void> };
 }
 
 interface PdfJsLike {
@@ -158,7 +158,7 @@ export class PdfRenderBackend {
     const old = this.doc;
     this.doc = null;
     this.docKey = '';
-    if (old) void old.destroy().catch(() => {});
+    if (old) void old.loadingTask.destroy().catch(() => {});
   }
 
   /** 清空预览位图缓存（切换 DPI 或文件时需要） */

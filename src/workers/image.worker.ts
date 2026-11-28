@@ -192,17 +192,9 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
         const outputName = glue.make_output_name(stem, paramsJson, encodeJson);
 
         send(
-          { v: PROTOCOL_VERSION, type: 'done', taskId, output, meta: resultMeta },
+          { v: PROTOCOL_VERSION, type: 'done', taskId, output, outputName, meta: resultMeta },
           [output],
         );
-        // outputName 单独放：它不在 ImageResultMeta 里，但 UI 需要
-        send({
-          v: PROTOCOL_VERSION,
-          type: 'log',
-          taskId,
-          level: 'info',
-          message: `outputName=${outputName}`,
-        });
       } catch (e) {
         sendError(taskId, errFrom(e));
       }

@@ -296,6 +296,8 @@ export type TaskPayload =
   | { kind: 'pdf.merge'; inputs: InputRef[] }
   | { kind: 'pdf.split'; input: InputRef; ranges: PageRange[] }
   | { kind: 'pdf.rotate'; input: InputRef; pages: PageSelectorDto; degrees: number }
+  | { kind: 'pdf.reorder'; input: InputRef; order: number[] }
+  | { kind: 'pdf.encrypt' | 'pdf.decrypt'; input: InputRef; password?: string }
   | { kind: 'pdf.extract'; input: InputRef; pages: PageSelectorDto; what: 'text' | 'images' | 'pages' }
   | { kind: 'office.structure'; input: InputRef; direction: 'docx2pdf' | 'pdf2docx' }
   /** 桌面端用 LibreOffice headless 原生转换（Web 不支持，UI 按 capabilities 决定） */

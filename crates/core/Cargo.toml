@@ -40,13 +40,17 @@ default-features = false
 features = ["wasm_js"]
 optional = true
 
+[dependencies.getrandom]
+version = "0.4"
+optional = true
+
 [features]
 default = ["exif", "pdf", "video", "office"]
 # EXIF 方向读取与元数据剥离
 exif = ["dep:kamadak-exif"]
 # wasm 图片分包标记（图片算法总在默认里，此 feature 仅用于分包识别）
 image = []
-pdf = ["dep:lopdf"]
+pdf = ["dep:lopdf", "dep:getrandom"]
 # 视频纯函数（argv/进度/元数据），无外部依赖
 video = []
 # 文档结构化辅助（纯逻辑，不涉及浏览器/子进程）
