@@ -50,11 +50,11 @@ for (const entry of wasmEntries) {
 
 // pdf.js 运行时（由 scripts/copy-pdfjs.mjs 拷进 dist/pdfjs）：
 // 必须进预缓存，否则离线时 getDocument 找不到 workerSrc / 标准字体，预览直接失败。
-// 只缓存 pdf.min.mjs + pdf.worker.min.mjs + standard_fonts（不缓存 renderer/sandbox，
+// 只缓存 pdf.min.mjs + pdf.worker.min.mjs + pdf.worker.compat.mjs + standard_fonts（不缓存 renderer/sandbox，
 // 在线版不用 worker 侧渲染）。绝不缓存任何 URL 含 ffmpeg 的资源。
 const pdfDir = join(outdir, 'pdfjs');
 try {
-  const pdfFiles = (await readDir2(pdfDir)).filter((f) => /^pdf(\.worker)?\.min\.mjs$/.test(f));
+  const pdfFiles = (await readDir2(pdfDir)).filter((f) => /^pdf\.worker(\.compat)?\.min\.mjs$|^pdf\.min\.mjs$/.test(f));
   for (const f of pdfFiles) extraAssets.push(`pdfjs/${f}`);
   const fontDir = join(pdfDir, 'standard_fonts');
   const fonts = (await readDir2(fontDir)).filter((f) => f.endsWith('.pfb'));

@@ -8,16 +8,16 @@ export function PreviewCompare({
   before: string | null;
   after: string | null;
 }) {
-  if (!before) return null;
+  if (!before && !after) return null;
 
   return (
     <div className="image-comparison">
-      <figure>
+      {before && <figure>
         <figcaption>原图</figcaption>
         <div className="image-preview-frame">
           <img src={before} alt="原图预览" />
         </div>
-      </figure>
+      </figure>}
       <figure>
         <figcaption>处理结果</figcaption>
         <div className={`image-preview-frame ${after ? 'is-result' : 'is-empty'}`}>

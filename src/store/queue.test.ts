@@ -34,6 +34,21 @@ const reset = () => {
 afterEach(reset);
 
 describe('task queue recovery', () => {
+  it('limits concurrent image jobs while allowing other media to run', async () => {
+    useQueue.getState().setConcurrency(2);
+    let finishFirst!: (value: TaskResult) => void;
+    let finishPdf!: (value: TaskResult) => void;
+    const firstGate = new Promise<TaskResult>((resolve) => { finishFirst = resolve; });
+    const pdfGate = new Promise<TaskResult>((resolve) => { finishPdf = resolve; });
+    const first = useQueue.getState().submit(task, undefined, async () => firstGate);
+    const pdfTask: TaskPayload = { kind: 'pdf.merge', inputs: [] };
+    const pdf = useQueue.getState().submit(pdfTask, undefined, async () => pdfGate);
+    expect(useQueue.getState().items.filter((item) => item.status === 'running')).toHaveLength(2);
+    finishFirst(result);
+    finishPdf(result);
+    await Promise.all([first, pdf]);
+  });
+
   it('retries a failed task with its runner', async () => {
     let attempts = 0;
     const runner = async () => {

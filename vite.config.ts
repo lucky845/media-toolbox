@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => ({
 
   plugins: [react(), versionWasmPairs()],
 
+  test: {
+    exclude: ['**/node_modules/**', '**/.agents/**', '**/.git/**'],
+  },
+
   resolve: {
     alias: {
       '@': resolve(here, 'src'),

@@ -127,38 +127,56 @@ pub fn resize<P: Parallel>(
     let sh = img.height as usize;
     let dw = tw as usize;
     let dh = th as usize;
-    let total = (dw * dh) as u64;
+    let total = dw
+        .checked_mul(dh)
+        .ok_or_else(|| media_ports::ToolError::invalid("缩放尺寸过大"))? as u64;
 
-    // ---- 水平缩放：按输入行分块，块内写 mid 的不重叠区间 ----
-    let mut mid = vec![0f32; dw * sh * 4];
+    // Bound float scratch by processing vertical output rows in batches. Each batch
+    // owns every source row its taps can reach, and rows are released before the
+    // next batch starts.
+    const MAX_BATCH_FLOATS: usize = 1_048_576;
     let h_taps = TapTable::build(sw, dw, filter);
+    let v_taps = TapTable::build(sh, dh, filter);
     let src = &img.data;
+    let row_len = dw
+        .checked_mul(4)
+        .ok_or_else(|| media_ports::ToolError::invalid("缩放尺寸过大"))?;
+    let out_len = row_len
+        .checked_mul(dh)
+        .ok_or_else(|| media_ports::ToolError::invalid("缩放尺寸过大"))?;
+    if row_len > MAX_BATCH_FLOATS {
+        return Err(media_ports::ToolError::invalid(
+            "缩放宽度超过临时缓冲区限制",
+        ));
+    }
+    let max_rows = (MAX_BATCH_FLOATS / row_len.max(1)).max(1);
+    let mut out = vec![0u8; out_len];
+    let out_chunk = row_len;
 
-    // 块大小 = 每个元素块覆盖的 f32 数量：一条输入行 = dw*4
-    // 我们要「每块是整数行」，所以 chunk_len = rows_per_chunk * dw * 4
-    let rows_per_chunk = (64_000 / dw.max(1)).max(1).min(sh.max(1));
-    let chunk_len = rows_per_chunk * dw * 4;
+    for batch_start in (0..dh).step_by(max_rows) {
+        let batch_end = batch_start.saturating_add(max_rows).min(dh);
+        let mut min_source = sh;
+        let mut max_source = 0usize;
+        for oy in batch_start..batch_end {
+            let first = v_taps.starts[oy];
+            let wbase = oy * v_taps.taps;
+            for k in 0..v_taps.taps {
+                if v_taps.weights[wbase + k] != 0.0 {
+                    let iy = (first + k).min(sh - 1);
+                    min_source = min_source.min(iy);
+                    max_source = max_source.max(iy + 1);
+                }
+            }
+        }
+        let source_rows = max_source.saturating_sub(min_source).max(1);
+        let mut mid = vec![0f32; source_rows * row_len];
 
-    ctx.progress
-        .report(Progress::new(0, total, Phase::Transforming, Unit::Pixels));
-
-    // 进度计数（并行时多线程累加，用原子）
-    let done = std::sync::atomic::AtomicU64::new(0);
-    let report_every = ctx.report_every_pixels.max(1) as u64;
-
-    parallel.for_each_chunk_mut(&mut mid, chunk_len, &|start, chunk| {
-        // start 是 f32 元素索引，一定是 dw*4 的整数倍
-        let first_row = start / (dw * 4);
-        let rows = chunk.len() / (dw * 4);
-
-        for r in 0..rows {
-            let y = first_row + r;
-            if y >= sh {
-                break;
+        parallel.for_each_chunk_mut(&mut mid, row_len, &|start, chunk| {
+            let y = min_source + start / row_len;
+            if y >= max_source {
+                return;
             }
             let src_row = &src[y * sw * 4..(y + 1) * sw * 4];
-            let out_row = &mut chunk[r * dw * 4..(r + 1) * dw * 4];
-
             for ox in 0..dw {
                 let first = h_taps.starts[ox];
                 let wbase = ox * h_taps.taps;
@@ -176,61 +194,42 @@ pub fn resize<P: Parallel>(
                     acc[3] += p[3] as f32 * w;
                 }
                 let o = ox * 4;
-                out_row[o] = acc[0];
-                out_row[o + 1] = acc[1];
-                out_row[o + 2] = acc[2];
-                out_row[o + 3] = acc[3];
+                chunk[o] = acc[0];
+                chunk[o + 1] = acc[1];
+                chunk[o + 2] = acc[2];
+                chunk[o + 3] = acc[3];
             }
-        }
+        });
 
-        if ctx.report_every_pixels > 0 {
-            let n = done.fetch_add((rows * dw) as u64, std::sync::atomic::Ordering::Relaxed);
-            if n % report_every < (rows * dw) as u64 {
-                ctx.progress.report(Progress::new(
-                    n.min(total),
-                    total,
-                    Phase::Transforming,
-                    Unit::Pixels,
-                ));
-            }
-        }
-    });
-
-    // ---- 垂直缩放：每个输出行独立（按输出行分块并行是安全的，因为 out 的区间不重叠）----
-    let v_taps = TapTable::build(sh, dh, filter);
-    let mut out = vec![0u8; dw * dh * 4];
-    let out_chunk = dw * 4;
-
-    let mid_ref = &mid;
-    parallel.for_each_chunk_mut(&mut out, out_chunk, &|start, chunk| {
-        let oy = start / out_chunk;
-        if oy >= dh {
-            return;
-        }
-        let first = v_taps.starts[oy];
-        let wbase = oy * v_taps.taps;
-
-        for ox in 0..dw {
-            let mut acc = [0f32; 4];
-            for k in 0..v_taps.taps {
-                let w = v_taps.weights[wbase + k];
-                if w == 0.0 {
-                    continue;
+        let mid_start = min_source;
+        let mid_ref = &mid;
+        let batch_out = &mut out[batch_start * out_chunk..batch_end * out_chunk];
+        parallel.for_each_chunk_mut(batch_out, out_chunk, &|start, chunk| {
+            let oy = batch_start + start / out_chunk;
+            let first = v_taps.starts[oy];
+            let wbase = oy * v_taps.taps;
+            for ox in 0..dw {
+                let mut acc = [0f32; 4];
+                for k in 0..v_taps.taps {
+                    let w = v_taps.weights[wbase + k];
+                    if w == 0.0 {
+                        continue;
+                    }
+                    let iy = (first + k).min(sh - 1);
+                    let o = ((iy - mid_start) * dw + ox) * 4;
+                    acc[0] += mid_ref[o] * w;
+                    acc[1] += mid_ref[o + 1] * w;
+                    acc[2] += mid_ref[o + 2] * w;
+                    acc[3] += mid_ref[o + 3] * w;
                 }
-                let iy = (first + k).min(sh - 1);
-                let o = (iy * dw + ox) * 4;
-                acc[0] += mid_ref[o] * w;
-                acc[1] += mid_ref[o + 1] * w;
-                acc[2] += mid_ref[o + 2] * w;
-                acc[3] += mid_ref[o + 3] * w;
+                let o = ox * 4;
+                chunk[o] = quantize_u8(acc[0] / 255.0);
+                chunk[o + 1] = quantize_u8(acc[1] / 255.0);
+                chunk[o + 2] = quantize_u8(acc[2] / 255.0);
+                chunk[o + 3] = quantize_u8(acc[3] / 255.0);
             }
-            let o = ox * 4;
-            chunk[o] = quantize_u8(acc[0] / 255.0);
-            chunk[o + 1] = quantize_u8(acc[1] / 255.0);
-            chunk[o + 2] = quantize_u8(acc[2] / 255.0);
-            chunk[o + 3] = quantize_u8(acc[3] / 255.0);
-        }
-    });
+        });
+    }
 
     ctx.progress.report(Progress::new(
         total,
@@ -300,6 +299,82 @@ mod tests {
             assert!(p[1].abs_diff(34) <= 1, "g={}", p[1]);
             assert!(p[2].abs_diff(56) <= 1, "b={}", p[2]);
             assert_eq!(p[3], 255);
+        }
+    }
+
+    fn legacy_resize_reference(img: &RasterImage, tw: u32, th: u32, filter: Filter) -> RasterImage {
+        let sw = img.width as usize;
+        let sh = img.height as usize;
+        let dw = tw as usize;
+        let dh = th as usize;
+        let h_taps = TapTable::build(sw, dw, filter);
+        let mut mid = vec![0f32; dw * sh * 4];
+
+        for y in 0..sh {
+            let src_row = &img.data[y * sw * 4..(y + 1) * sw * 4];
+            let out_row = &mut mid[y * dw * 4..(y + 1) * dw * 4];
+            for ox in 0..dw {
+                let first = h_taps.starts[ox];
+                let wbase = ox * h_taps.taps;
+                let mut acc = [0f32; 4];
+                for k in 0..h_taps.taps {
+                    let w = h_taps.weights[wbase + k];
+                    if w == 0.0 {
+                        continue;
+                    }
+                    let p = &src_row[(first + k).min(sw - 1) * 4..(first + k).min(sw - 1) * 4 + 4];
+                    for c in 0..4 {
+                        acc[c] += p[c] as f32 * w;
+                    }
+                }
+                out_row[ox * 4..ox * 4 + 4].copy_from_slice(&acc);
+            }
+        }
+
+        let v_taps = TapTable::build(sh, dh, filter);
+        let mut out = vec![0u8; dw * dh * 4];
+        for oy in 0..dh {
+            let first = v_taps.starts[oy];
+            let wbase = oy * v_taps.taps;
+            for ox in 0..dw {
+                let mut acc = [0f32; 4];
+                for k in 0..v_taps.taps {
+                    let w = v_taps.weights[wbase + k];
+                    if w == 0.0 {
+                        continue;
+                    }
+                    let offset = ((first + k).min(sh - 1) * dw + ox) * 4;
+                    for c in 0..4 {
+                        acc[c] += mid[offset + c] * w;
+                    }
+                }
+                for c in 0..4 {
+                    out[(oy * dw + ox) * 4 + c] = quantize_u8(acc[c] / 255.0);
+                }
+            }
+        }
+        RasterImage::new(tw, th, out).unwrap()
+    }
+
+    #[test]
+    fn rolling_rows_match_full_intermediate_for_filters_and_edges() {
+        let cases = [(7, 5, 3, 9), (2, 9, 11, 2), (1, 7, 8, 1), (13, 1, 1, 9)];
+        for (sw, sh, tw, th) in cases {
+            let img = gradient(sw, sh);
+            for filter in [
+                Filter::Nearest,
+                Filter::Triangle,
+                Filter::CatmullRom,
+                Filter::Gaussian,
+                Filter::Lanczos3,
+            ] {
+                let expected = legacy_resize_reference(&img, tw, th, filter);
+                let actual = resize(&img, tw, th, filter, &SerialParallel, &ctx()).unwrap();
+                assert_eq!(
+                    actual.data, expected.data,
+                    "{sw}x{sh}->{tw}x{th} {filter:?}"
+                );
+            }
         }
     }
 

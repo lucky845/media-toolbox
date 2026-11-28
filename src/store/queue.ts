@@ -179,9 +179,17 @@ export const useQueue = create<QueueState>((set, get) => {
   function pump() {
     const { items, paused, concurrency } = get();
     if (paused) return;
-    const slots = Math.max(0, concurrency - items.filter((item) => item.status === 'running').length);
-    for (const item of items.filter((entry) => entry.status === 'queued').slice(0, slots)) {
+
+    const running = items.filter((item) => item.status === 'running');
+    let availableSlots = Math.max(0, concurrency - running.length);
+    let runningImages = running.filter((item) => item.task.kind === 'image.process').length;
+
+    for (const item of items.filter((entry) => entry.status === 'queued')) {
+      if (availableSlots === 0) break;
+      if (item.task.kind === 'image.process' && runningImages >= 1) continue;
       void start(item);
+      availableSlots--;
+      if (item.task.kind === 'image.process') runningImages++;
     }
   }
 

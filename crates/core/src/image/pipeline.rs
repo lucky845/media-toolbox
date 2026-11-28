@@ -10,15 +10,30 @@ use crate::common::limits_check::{
     check_bytes, check_memory_estimate, check_pixels, estimate_image_peak,
 };
 use crate::image::decode::{decode_rgba, probe, sniff_format, RasterImage};
-use crate::image::encode::{encode, prepare_for_format};
+use crate::image::encode::{encode, prepare_for_format_owned};
 use crate::image::geometry::{apply_orientation, crop, fill_canvas, flip, rotate};
-use crate::image::params::{EncodeOptions, ImageMeta, ImageParams, ImageResult};
+use crate::image::params::{EncodeOptions, Flip, ImageMeta, ImageParams, ImageResult, Rotation};
 use crate::image::resize::{resize, ResizeCtx};
 use media_ports::codec::{human_bytes, ImageFormat};
 use media_ports::{
     CancelToken, ErrorCode, Limits, Parallel, Phase, Progress, ProgressSink, Result, ToolError,
     Unit,
 };
+
+/// Apply requested rotations/flips while preserving ownership for identity operations.
+fn transform_geometry(
+    mut img: RasterImage,
+    rotation: Rotation,
+    flip_mode: Flip,
+) -> Result<RasterImage> {
+    if rotation != Rotation::None {
+        img = rotate(&img, rotation)?;
+    }
+    if flip_mode != Flip::None {
+        img = flip(&img, flip_mode)?;
+    }
+    Ok(img)
+}
 
 /// 一次处理所需的全部外部依赖。`core` 不持有它们，只借用。
 pub struct Ctx<'a, P: Parallel> {
@@ -115,8 +130,7 @@ pub fn process_image<P: Parallel>(
     }
 
     // ---- 5. 旋转 / 翻转 ----
-    img = rotate(&img, params.rotate)?;
-    img = flip(&img, params.flip)?;
+    img = transform_geometry(img, params.rotate, params.flip)?;
 
     // ---- 6. 缩放 ----
     if let Some(r) = &params.resize {
@@ -141,7 +155,7 @@ pub fn process_image<P: Parallel>(
         .report(Progress::new(0, 0, Phase::Encoding, Unit::Percent));
 
     // ---- 8. 背景填充（目标格式不支持 alpha 时）----
-    img = prepare_for_format(&img, opts, params.background);
+    img = prepare_for_format_owned(img, opts, params.background);
 
     // ---- 9. 编码 ----
     let mut out = encode(&img, opts)?;
@@ -271,8 +285,7 @@ pub fn process_stage_decode<P: Parallel>(
     if let Some(c) = params.crop {
         img = crop(&img, c)?;
     }
-    img = rotate(&img, params.rotate)?;
-    img = flip(&img, params.flip)?;
+    img = transform_geometry(img, params.rotate, params.flip)?;
     if let Some(r) = &params.resize {
         if let Some((tw, th)) = r.target_size(img.width, img.height) {
             img = resize(
@@ -299,6 +312,15 @@ mod tests {
     use super::*;
     use media_ports::progress::NoopProgress;
     use media_ports::{NeverCancel, SerialParallel};
+
+    #[test]
+    fn identity_geometry_keeps_the_original_pixel_allocation() {
+        let img = RasterImage::new(2, 2, [1, 2, 3, 4].repeat(4)).unwrap();
+        let ptr = img.data.as_ptr();
+        let out = transform_geometry(img, Rotation::None, Flip::None).unwrap();
+        assert_eq!(out.data.as_ptr(), ptr);
+        assert_eq!(out.data, [1, 2, 3, 4].repeat(4));
+    }
 
     #[test]
     fn gif_encoding_reports_indeterminate_progress() {

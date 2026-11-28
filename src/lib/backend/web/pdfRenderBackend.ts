@@ -15,6 +15,7 @@
 // 让 UI 有机会响应；解析这一重活仍在 pdf.js 自己的 Worker 里。
 
 import type { PageRange, PdfRenderParams, RunOptions, TaskResult, ToolError } from '../types';
+import { installPdfJsMapCompat } from '../../pdfMapCompat';
 
 // pdf.js 只在编译期提供类型；运行时通过 BASE_URL 拼出的同源 URL 动态 import，
 // 不进 Vite 模块图（路径必须是 /pdfjs/pdf.min.mjs，见 scripts/copy-pdfjs.mjs）。
@@ -117,11 +118,23 @@ export class PdfRenderBackend {
 
   private loadLib(): Promise<PdfJsLike> {
     if (this.libPromise) return this.libPromise;
+    installPdfJsMapCompat();
     const url = `${baseUrl()}pdfjs/pdf.min.mjs`;
     this.libPromise = import(/* @vite-ignore */ url)
       .then((mod) => {
         const lib = mod as unknown as PdfJsLike;
-        lib.GlobalWorkerOptions.workerSrc = `${baseUrl()}pdfjs/pdf.worker.min.mjs`;
+        const workerSource = [
+          'const proto = globalThis.Map.prototype;',
+          "if (typeof proto.getOrInsertComputed !== 'function') Object.defineProperty(proto, 'getOrInsertComputed', { configurable: true, writable: true, value(key, callback) { if (this.has(key)) return this.get(key); const value = callback(); this.set(key, value); return value; } });",
+          "if (typeof proto.getOrInsert !== 'function') Object.defineProperty(proto, 'getOrInsert', { configurable: true, writable: true, value(key, value) { if (this.has(key)) return this.get(key); this.set(key, value); return value; } });",
+          'const weakProto = globalThis.WeakMap.prototype;',
+          "if (typeof weakProto.getOrInsertComputed !== 'function') Object.defineProperty(weakProto, 'getOrInsertComputed', { configurable: true, writable: true, value(key, callback) { if (this.has(key)) return this.get(key); const value = callback(); this.set(key, value); return value; } });",
+          "if (typeof weakProto.getOrInsert !== 'function') Object.defineProperty(weakProto, 'getOrInsert', { configurable: true, writable: true, value(key, value) { if (this.has(key)) return this.get(key); this.set(key, value); return value; } });",
+          `await import(${JSON.stringify(new URL(`${baseUrl()}pdfjs/pdf.worker.min.mjs`, globalThis.location.href).href)});`,
+        ].join('\n');
+        lib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(
+          new Blob([workerSource], { type: 'text/javascript' }),
+        );
         lib.GlobalWorkerOptions.standardFontDataUrl = `${baseUrl()}pdfjs/standard_fonts/`;
         return lib;
       })

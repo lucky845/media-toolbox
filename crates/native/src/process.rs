@@ -197,6 +197,44 @@ pub fn run_capture(binary: &Path, args: &[String]) -> Result<String, ToolError> 
     })
 }
 
+/// 运行一个不需要回传 stdout 的短命令，并支持硬取消。
+pub fn run_capture_with_cancel(
+    binary: &Path,
+    args: &[String],
+    cancel: &TaskCancel,
+) -> Result<(), ToolError> {
+    let mut cmd = Command::new(binary);
+    cmd.args(args).stdout(Stdio::null()).stderr(Stdio::null());
+    configure_spawn(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| {
+        let name = binary
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("command");
+        ToolError::new(ErrorCode::BinaryMissing, &[("name", name)])
+            .with_detail(format!("spawn failed: {}", e.kind()))
+    })?;
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    spawn_watchdog(cancel, child.id(), done.clone());
+    let status = child
+        .wait()
+        .map_err(|e| ToolError::io(format!("wait failed: {}", e.kind())))?;
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    if cancel.is_cancelled() {
+        return Err(ToolError::cancelled());
+    }
+    if !status.success() {
+        return Err(ToolError::new(
+            ErrorCode::EncodeFailed,
+            &[(
+                "detail",
+                &format!("命令退出码 {}", status.code().unwrap_or(-1)),
+            )],
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

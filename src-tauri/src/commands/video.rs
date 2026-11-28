@@ -52,6 +52,8 @@ pub struct VideoTranscodeArgs {
 pub struct VideoTranscodeResult {
     pub output_path: String,
     pub out_format: String,
+    pub input_bytes: u64,
+    pub output_bytes: u64,
     pub out_width: u32,
     pub out_height: u32,
     pub duration_sec: f64,
@@ -221,6 +223,9 @@ pub async fn video_transcode(
 
     // 输出路径：同目录 + taskId 命名（避免覆盖）。
     let src = std::path::Path::new(&args.input_path);
+    let input_bytes = std::fs::metadata(src)
+        .map_err(|e| ToolError::io(format!("读取输入大小失败: {}", e.kind())))?
+        .len();
     let stem = src
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -272,9 +277,14 @@ pub async fn video_transcode(
     .await
     .map_err(|e| ToolError::internal(format!("任务崩溃: {e}")))??;
 
+    let output_bytes = std::fs::metadata(&output)
+        .map_err(|e| ToolError::io(format!("读取输出大小失败: {}", e.kind())))?
+        .len();
     Ok(VideoTranscodeResult {
         output_path: output.to_string_lossy().into_owned(),
         out_format: container.into(),
+        input_bytes,
+        output_bytes,
         out_width: params.width.unwrap_or(probe.width),
         out_height: params.height.unwrap_or(probe.height),
         duration_sec: probe.duration_sec,

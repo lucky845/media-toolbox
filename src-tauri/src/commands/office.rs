@@ -5,7 +5,7 @@
 //! `LibreOfficeMissing`，前端据此回退到结构化转换（Web 同款）。
 
 use media_native::cancel::TaskGuard;
-use media_native::process::run_capture;
+use media_native::process::run_capture_with_cancel;
 use media_ports::error::ErrorCode;
 use media_ports::ToolError;
 use serde::Serialize;
@@ -42,7 +42,8 @@ pub async fn office_convert(
     direction: String,
     task_id: String,
 ) -> Result<OfficeConvertResult, ToolError> {
-    let _guard = TaskGuard::new(&task_id);
+    let guard = TaskGuard::new(&task_id);
+    let cancel = guard.token().clone();
     // 先校验方向（纯逻辑），再查二进制：无效参数不应被「组件缺失」掩盖。
     let (filter, ext) = match direction.as_str() {
         "docx2pdf" => ("pdf:writer_pdf_Export", "pdf"),
@@ -56,7 +57,7 @@ pub async fn office_convert(
     // 临时目录由阻塞任务持有，直到子进程退出和发布完成。
     let output = tokio::task::spawn_blocking(move || {
         convert_office_file(Path::new(&input_path), filter, ext, &task_id, |argv| {
-            run_capture(&soffice, argv).map(|_| ())
+            run_capture_with_cancel(&soffice, argv, &cancel)
         })
     })
     .await

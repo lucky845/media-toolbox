@@ -13,7 +13,7 @@
 //   standard_fonts/        PDF 标准字体数据；不拷则部分 PDF 的文字渲染为空白
 // 不拷 pdf.renderer.min.mjs：worker 侧渲染需要 document.fonts，在线版走主线程渲染。
 
-import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dirname, '..');
@@ -26,6 +26,17 @@ const files = ['pdf.min.mjs', 'pdf.worker.min.mjs'];
 for (const f of files) {
   await copyFile(join(src, 'build', f), join(dst, f));
 }
+await writeFile(join(dst, 'pdf.worker.compat.mjs'), [
+  '// WebKit compatibility for pdf.js Map upsert helpers.',
+  'const mapProto = Map.prototype;',
+  "if (!mapProto.getOrInsertComputed) Object.defineProperty(mapProto, 'getOrInsertComputed', { configurable: true, value(key, callback) { if (this.has(key)) return this.get(key); const value = callback(); this.set(key, value); return value; } });",
+  "if (!mapProto.getOrInsert) Object.defineProperty(mapProto, 'getOrInsert', { configurable: true, value(key, value) { if (this.has(key)) return this.get(key); this.set(key, value); return value; } });",
+  'const weakProto = WeakMap.prototype;',
+  "if (!weakProto.getOrInsertComputed) Object.defineProperty(weakProto, 'getOrInsertComputed', { configurable: true, value(key, callback) { if (this.has(key)) return this.get(key); const value = callback(); this.set(key, value); return value; } });",
+  "if (!weakProto.getOrInsert) Object.defineProperty(weakProto, 'getOrInsert', { configurable: true, value(key, value) { if (this.has(key)) return this.get(key); this.set(key, value); return value; } });",
+  "await import('./pdf.worker.min.mjs');",
+  '',
+].join('\n'));
 
 const fonts = await readdir(join(src, 'standard_fonts'));
 for (const f of fonts) {
@@ -33,4 +44,4 @@ for (const f of fonts) {
   await copyFile(join(src, 'standard_fonts', f), join(dst, 'standard_fonts', f));
 }
 
-console.log(`✓ 已拷贝 pdf.js ${files.length} 个文件 + ${fonts.filter((f) => f.endsWith('.pfb')).length} 个标准字体到 public/pdfjs/`);
+console.log(`✓ 已拷贝 pdf.js ${files.length} 个文件 + worker 兼容层 + ${fonts.filter((f) => f.endsWith('.pfb')).length} 个标准字体到 public/pdfjs/`);

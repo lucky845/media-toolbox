@@ -52,7 +52,6 @@ export class DesktopBackend implements Backend {
   private capsCache: Capabilities | null = null;
   private limitsCache: Limits | null = null;
   private unlisteners: UnlistenFn[] = [];
-  private running = new Map<string, AbortController>();
   private listenersAttached = false;
 
   private async attachListeners(): Promise<void> {
@@ -109,14 +108,13 @@ export class DesktopBackend implements Backend {
 
   async run(task: TaskPayload, opts: RunOptions): Promise<TaskResult> {
     await this.attachListeners();
-    const ac = new AbortController();
-    this.running.set(opts.taskId, ac);
+    if (opts.signal.aborted) {
+      throw { code: 'CANCELLED', message: '任务已取消', retryable: true, desktopHint: false } satisfies ToolError;
+    }
     this.progressHandlers.set(opts.taskId, opts.onProgress);
     if (opts.onLog) this.logHandlers.set(opts.taskId, opts.onLog);
 
-    const onAbort = () => {
-      void invoke('cancel_task', { taskId: opts.taskId });
-    };
+    const onAbort = () => this.cancel(opts.taskId);
     opts.signal.addEventListener('abort', onAbort, { once: true });
 
     try {
@@ -136,18 +134,23 @@ export class DesktopBackend implements Backend {
           meta: ImageResultMeta;
           outputBytes: number;
         }>('image_process', {
-          inputPath: task.input.path,
-          params: task.params,
-          encode: task.encode,
-          taskId: opts.taskId,
+          args: {
+            inputPath: task.input.path,
+            params: task.params,
+            encode: task.encode,
+            taskId: opts.taskId,
+          },
         });
 
-        // 读取结果字节用于预览（仅预览，不用于写盘）
-        const bytes = await invoke<number[]>('read_output_preview', { path: r.outputPath });
+        const name = r.outputPath.split(/[\\/]/).pop() ?? 'output';
+        const preview = r.outputBytes <= 8 * 1024 * 1024 && r.meta.outFormat !== 'qoi'
+          ? await invoke<ArrayBuffer>('read_output_preview', { path: r.outputPath }).catch(() => undefined)
+          : undefined;
         return {
-          bytes: new Uint8Array(bytes),
+          bytes: preview ? new Uint8Array(preview) : new Uint8Array(0),
           meta: r.meta,
-          outputName: r.outputPath.split(/[\\/]/).pop() ?? 'output',
+          outputName: name,
+          savedOutputs: [{ name, path: r.outputPath, bytes: r.outputBytes }],
         };
       }
 
@@ -239,10 +242,12 @@ export class DesktopBackend implements Backend {
             outFormat: p.container,
             outWidth: r.outWidth,
             outHeight: r.outHeight,
-            inputBytes: task.input.size,
-            outputBytes: 0,
+            inputBytes: r.inputBytes ?? task.input.size,
+            outputBytes: r.outputBytes ?? 0,
             outputHash: '',
-            savingsRatio: 0,
+            savingsRatio: (r.inputBytes ?? task.input.size) > 0 && r.outputBytes !== undefined
+              ? ((r.inputBytes ?? task.input.size) - r.outputBytes) / (r.inputBytes ?? task.input.size)
+              : 0,
             savingsText: `已写入 ${r.outputPath.split(/[\\/]/).pop() ?? '文件'}`,
           },
           outputName: r.outputPath.split(/[\\/]/).pop() ?? 'video',
@@ -259,8 +264,12 @@ export class DesktopBackend implements Backend {
       opts.signal.removeEventListener('abort', onAbort);
       this.progressHandlers.delete(opts.taskId);
       this.logHandlers.delete(opts.taskId);
-      this.running.delete(opts.taskId);
     }
+  }
+
+  async readImagePreview(ref: InputRef): Promise<ArrayBuffer> {
+    if (!ref.path) throw { code: 'INVALID_PARAMS', message: '桌面端需要图片路径', retryable: false, desktopHint: false } satisfies ToolError;
+    return invoke('read_output_preview', { path: ref.path });
   }
 
   /** PDF 探测：桌面读取路径，Rust 只返回元数据。 */
@@ -314,9 +323,7 @@ export class DesktopBackend implements Backend {
   }
 
   cancel(taskId: string): void {
-    this.running.get(taskId)?.abort();
-    // 同时通知后端（即使 AbortController 已触发，也确保 Rust 侧收到）
-    void invoke('cancel_task', { taskId });
+    void invoke('cancel_task', { taskId }).catch(() => undefined);
   }
 
   async pickFiles(accept: string, multiple: boolean): Promise<InputRef[]> {
@@ -361,6 +368,5 @@ export class DesktopBackend implements Backend {
     this.listenersAttached = false;
     this.progressHandlers.clear();
     this.logHandlers.clear();
-    this.running.clear();
   }
 }
