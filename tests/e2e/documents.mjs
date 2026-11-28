@@ -14,9 +14,15 @@ page.on('console', (m) => {
   if (m.type() === 'error') errors.push(`console: ${m.text()}`);
 });
 
-// 无头环境强制降级 <a download>
+// 第一次取消保存；下一次禁用 picker，以有下载事件的真实回退路径验证重试。
 await page.addInitScript(() => {
-  Object.defineProperty(globalThis, 'showSaveFilePicker', { value: undefined, configurable: true });
+  Object.defineProperty(globalThis, 'showSaveFilePicker', {
+    value: async () => {
+      Object.defineProperty(globalThis, 'showSaveFilePicker', { value: undefined, configurable: true });
+      throw new DOMException('Save cancelled', 'AbortError');
+    },
+    configurable: true,
+  });
 });
 
 await page.goto(`${base}/#/documents`, { waitUntil: 'networkidle' });
@@ -24,18 +30,26 @@ await page.waitForSelector('.dropzone', { timeout: 20_000 });
 await page.locator('input[type="file"]').setInputFiles(fixture);
 await page.waitForSelector('.mono:has-text("sample.docx")', { timeout: 10_000 });
 
-// 在线版走结构化路径（按钮文案「开始结构化转换」）；点击后应下载中间 JSON
-const downloadPromise = page.waitForEvent('download', { timeout: 40_000 });
-const runBtn = page.getByRole('button', { name: '开始结构化转换' });
-await runBtn.click();
+// 取消后显示未保存，不应出现下载或成功提示。
+let downloads = 0;
+page.on('download', () => downloads++);
+await page.getByRole('button', { name: '开始结构化转换' }).click();
+const notice = page.getByRole('status').filter({ hasText: '已取消保存' });
+await notice.waitFor({ timeout: 40_000 });
+const cancelled = await notice.innerText();
+const cancelledOnly = downloads === 0 && cancelled.includes('文件未保存') && !cancelled.includes('已发起下载');
+
+// 不重新转换，直接保存已生成的文件；真实 <a download> 下载中间 JSON。
+const downloadPromise = page.waitForEvent('download', { timeout: 10_000 });
+await page.getByRole('button', { name: '重新保存' }).click();
 const download = await downloadPromise;
 const name = download.suggestedFilename();
+const success = page.getByRole('status').filter({ hasText: '已发起下载' });
+await success.waitFor({ timeout: 10_000 });
+const result = await success.innerText();
 
-// 成功提示里有「结构化结果已生成」
-await page.waitForSelector('.notice.info:has-text("结构化结果已生成")', { timeout: 10_000 }).catch(() => {});
-const result = (await page.locator('.notice.info').allInnerTexts()).join(' | ');
-
-const pass = errors.length === 0 && /converted\.json$|\.json$/.test(name) && result.includes('结构化结果已生成');
-console.log(JSON.stringify({ pass, name, result, errors }, null, 2));
+const pass = errors.length === 0 && cancelledOnly && /\.json$/.test(name) &&
+  result.includes('结构化结果已生成') && !(await notice.count());
+console.log(JSON.stringify({ pass, name, cancelled, result, errors }, null, 2));
 await browser.close();
 process.exit(pass ? 0 : 1);

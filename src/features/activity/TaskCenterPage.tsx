@@ -39,15 +39,14 @@ function TaskQueue() {
           </button>
         </div>
       )}
-      {items.length ? (
-        <QueuePanel
-          active={items.filter(isActive)}
-          finished={items.filter((item) => !isActive(item))}
-          paused={paused}
-          onPause={() => setPaused(!paused)}
-          onClear={() => clearFinished()}
-        />
-      ) : (
+      <QueuePanel
+        active={items.filter(isActive)}
+        finished={items.filter((item) => !isActive(item))}
+        paused={paused}
+        onPause={() => setPaused(!paused)}
+        onClear={() => clearFinished()}
+      />
+      {items.length === 0 && (
         <div className="activity-section activity-empty">
           <h2>队列中暂无任务</h2>
           <p className="hint">从工具栏目选择一项工具并开始处理，任务会显示在这里。</p>

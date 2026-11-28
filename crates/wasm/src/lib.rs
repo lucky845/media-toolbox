@@ -238,6 +238,15 @@ pub fn format_duration(secs: f64) -> String {
     human_duration(secs.max(0.0) as u64)
 }
 
+/// 体积变化文案：只计算元数据，不重新运行图片流水线。
+#[wasm_bindgen]
+pub fn savings_text(input_bytes: f64, output_bytes: f64) -> String {
+    media_core::image::pipeline::savings_text(
+        input_bytes.max(0.0) as u64,
+        output_bytes.max(0.0) as u64,
+    )
+}
+
 // ---------- 内部 ----------
 
 /// 单调时钟：`performance.now()`（ms，浮点）。节流只需要相对时间，浮点转 u64 足够。

@@ -135,8 +135,10 @@ pub fn process_image<P: Parallel>(
     }
 
     ctx.cancel.check().map_err(|_| ToolError::cancelled())?;
+    // 编码器（尤其 GIF 调色板量化）无法提供可靠的增量进度。
+    // 使用不确定进度，避免桌面端显示为 0% 后长时间静止。
     ctx.progress
-        .report(Progress::new(0, 1, Phase::Encoding, Unit::Percent));
+        .report(Progress::new(0, 0, Phase::Encoding, Unit::Percent));
 
     // ---- 8. 背景填充（目标格式不支持 alpha 时）----
     img = prepare_for_format(&img, opts, params.background);
@@ -176,6 +178,40 @@ pub fn compress<P: Parallel>(
     ctx: &Ctx<'_, P>,
 ) -> Result<ImageResult> {
     process_image(input, &ImageParams::default(), opts, ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use media_ports::progress::NoopProgress;
+    use media_ports::{NeverCancel, SerialParallel};
+
+    #[test]
+    fn gif_encoding_reports_indeterminate_progress() {
+        let input = include_bytes!("../../../../tests/fixtures/gradient.png");
+        let parallel = SerialParallel;
+        let progress = NoopProgress;
+        let cancel = NeverCancel;
+        let limits = Limits::DESKTOP;
+        let ctx = Ctx {
+            parallel: &parallel,
+            progress: &progress,
+            cancel: &cancel,
+            limits: &limits,
+        };
+        let result = process_image(
+            input,
+            &ImageParams::default(),
+            &EncodeOptions {
+                format: ImageFormat::Gif,
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("PNG to GIF conversion should complete");
+        assert_eq!(result.out_format, ImageFormat::Gif);
+        assert!(!result.output.is_empty());
+    }
 }
 
 /// 输出文件名生成：`{原名}-{摘要}.{ext}`，重名由调用方加序号。

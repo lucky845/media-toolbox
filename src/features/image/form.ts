@@ -153,6 +153,36 @@ export function buildParams(
   };
 }
 
+// Mirrors the dimension-changing steps of the Rust pipeline for the form's
+// single-width resize. The encoder still validates the actual raster.
+export function icoSizeError(meta: ImageMeta | null, params: ImageParams, format: EncodeOptions['format']): string | null {
+  if (format !== 'ico') return null;
+  let width: number;
+  let height: number;
+  if (params.canvas) {
+    ({ width, height } = params.canvas);
+  } else {
+    if (!meta) return null;
+    ({ width, height } = meta);
+    if (params.applyExifOrientation && meta.exifOrientation >= 5 && meta.exifOrientation <= 8) {
+      [width, height] = [height, width];
+    }
+    if (params.crop) {
+      width = Math.min(params.crop.width, width - params.crop.x);
+      height = Math.min(params.crop.height, height - params.crop.y);
+    }
+    if (params.rotate === 'cw90' || params.rotate === 'cw270') [width, height] = [height, width];
+    if (params.resize?.width != null && params.resize.height == null) {
+      const target = params.resize.allowUpscale ? params.resize.width : Math.min(width, params.resize.width);
+      height = Math.max(1, Math.round(height * (target / width)));
+      width = target;
+    }
+  }
+  return width > 256 || height > 256
+    ? `预计输出 ${width} × ${height} 像素。ICO 宽和高均须不超过 256 像素，请缩小输出或选择其他格式。`
+    : null;
+}
+
 /** 参数的人类可读摘要（用于最近任务与输出命名提示） */
 export function describeParams(params: ImageParams): string {
   const parts: string[] = [];

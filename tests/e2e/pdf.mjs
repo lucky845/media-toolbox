@@ -66,12 +66,38 @@ try {
   await execute.click();
   await page.getByText(/合并最多支持 50 个 PDF/).waitFor();
   await page.reload();
+  await page.getByRole('link', { name: '添加密码', exact: true }).click();
+  const brokenPdf = pdf('broken.pdf', Buffer.from('not a PDF'));
+  await picker.setInputFiles(brokenPdf);
+  await page.getByText(/^broken\.pdf：/).waitFor({ timeout: 10_000 });
+  assert.ok(await execute.isDisabled());
+  await page.getByText('无法读取此 PDF，请重新选择文件。', { exact: true }).waitFor();
+
+  await picker.setInputFiles([brokenPdf, pdf('valid.pdf')]);
+  const passwordField = page.locator('input[type="password"]');
+  await page.getByText('请输入打开密码。', { exact: true }).waitFor();
+  await passwordField.fill('测'.repeat(43));
+  await page.getByText('打开密码不能超过 127 字节。', { exact: true }).waitFor();
+  assert.ok(await execute.isDisabled());
+  await passwordField.fill('test-password');
+  const batchDownload = page.waitForEvent('download', { timeout: 15_000 });
+  await execute.click();
+  assert.match((await batchDownload).suggestedFilename(), /^valid-/);
+  await page.getByText(/^已处理 1 \/ 2 份 PDF。broken\.pdf：/).waitFor();
+
+  await passwordField.fill('test-password');
+  await page.getByRole('button', { name: '移除第 1 个文件 broken.pdf' }).click();
+  await pageCount.waitFor({ state: 'visible' });
+  assert.equal(await passwordField.inputValue(), 'test-password');
+  assert.ok(await execute.isEnabled());
+
+  await page.reload();
   await uploadAndProbe(pdf('extract.pdf'));
   await page.getByRole('link', { name: '提取页面', exact: true }).click();
   const range = page.getByRole('textbox', { name: '页码范围' });
   await range.fill(String(firstPages + 1));
-  await execute.click();
-  await page.getByText(/页码范围无效/).first().waitFor();
+  await page.getByText(/页码范围无效/).waitFor();
+  assert.ok(await execute.isDisabled());
   await range.fill('1');
   const extractDone = page.waitForEvent('download', { timeout: 40_000 });
   await execute.click();

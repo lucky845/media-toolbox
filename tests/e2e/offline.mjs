@@ -6,7 +6,7 @@
 
 import { chromium } from 'playwright';
 
-const base = 'http://localhost:4173';
+const base = process.argv[2] ?? 'http://localhost:4173';
 const browser = await chromium.launch();
 const context = await browser.newContext();
 const page = await context.newPage();
@@ -25,6 +25,11 @@ await page.goto(`${base}/#/help`, { waitUntil: 'domcontentloaded' });
 try {
   await page.getByText('首次在线加载后可用（Service Worker 正在安装）', { exact: true })
     .waitFor({ timeout: 15_000 });
+  // Simulate a cache left by the previous deployment, with an incompatible glue file.
+  await page.evaluate(async () => {
+    const old = await caches.open('mt-shell-v1-phase4-webcodecs');
+    await old.put(new URL('wasm/core_image.js', document.baseURI), new Response('/* obsolete glue */'));
+  });
 } finally {
   releaseWorker();
 }
@@ -38,7 +43,7 @@ await page.waitForFunction(
 );
 // 等 wasm 被 SW 缓存（跑一次图片处理）
 await page.locator('input[type="file"]').setInputFiles('tests/fixtures/gradient.png');
-await page.waitForSelector('dl.kv', { timeout: 20_000 });
+await page.waitForSelector('dl.source-details', { timeout: 20_000 });
 await page.getByRole('button', { name: '开始处理' }).click();
 await page.waitForSelector('.task.succeeded', { timeout: 40_000 });
 
@@ -64,7 +69,7 @@ const offlineText = (await page.locator('main').innerText()).replace(/\n+/g, ' |
 
 // ---- 3. 离线再处理一张图 ----
 await page.locator('input[type="file"]').setInputFiles('tests/fixtures/solid.png');
-await page.waitForSelector('dl.kv', { timeout: 15_000 });
+await page.waitForSelector('dl.source-details', { timeout: 15_000 });
 await page.getByRole('button', { name: '开始处理' }).click();
 await page.waitForSelector('.task.succeeded', { timeout: 40_000 });
 const offlineTask = (await page.locator('.task.succeeded').first().innerText()).replace(/\n+/g, ' | ');

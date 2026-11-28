@@ -22,6 +22,7 @@ import {
   compressionPresetQuality,
   defaultForm,
   describeParams,
+  icoSizeError,
   needsBackgroundNotice,
   normalizeImageSection,
   type ImageFormState,
@@ -38,6 +39,7 @@ export function ImagePage({ section }: { section?: string }) {
   const canvasHelpId = useId();
   const canvasErrorId = useId();
   const outputId = useId();
+  const icoNoticeId = useId();
   const { caps, limits, status } = useCapabilities();
   const settings = useSettings();
   const availableFormats = caps?.image.formats ?? [];
@@ -48,6 +50,7 @@ export function ImagePage({ section }: { section?: string }) {
 
   const [selected, setSelected] = useState<InputRef | null>(null);
   const [batch, setBatch] = useState<InputRef[]>([]);
+  const [batchIcoErrors, setBatchIcoErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const probeGeneration = useRef(0);
@@ -148,6 +151,10 @@ export function ImagePage({ section }: { section?: string }) {
     setForm((f) => ({ ...f, adjust: adjust ?? { brightness: 1, contrast: 1, saturation: 1 } }));
   }, []);
 
+  const params = buildParams(form, meta, current);
+  const icoError = icoSizeError(meta, params, encode.format);
+  useEffect(() => setBatchIcoErrors([]), [batch, form, current, encode.format]);
+
   const exceedsBatchLimit = !!limits && limits.maxBatch > 0 && batch.length > limits.maxBatch;
   const canSubmit = status === 'ready' && availableFormats.length > 0 && !invalidCanvas && !exceedsBatchLimit;
 
@@ -155,9 +162,11 @@ export function ImagePage({ section }: { section?: string }) {
     if (!canSubmit || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
+    setBatchIcoErrors([]);
     try {
       const backend = await getBackend();
       const prepared = [];
+      const errors: string[] = [];
       for (const ref of batch) {
         let refMeta = ref === selected ? meta : null;
         if (!refMeta && backend.probe) {
@@ -167,8 +176,12 @@ export function ImagePage({ section }: { section?: string }) {
             // The queue records this file’s processing error independently.
           }
         }
-        prepared.push({ ref, params: buildParams(form, refMeta, current) });
+        const refParams = buildParams(form, refMeta, current);
+        const error = icoSizeError(refMeta, refParams, encode.format);
+        if (error) errors.push(`${ref.name}：${error}`);
+        else prepared.push({ ref, params: refParams });
       }
+      setBatchIcoErrors(errors);
       for (const { ref, params } of prepared) enqueue(ref, params, encode);
     } finally {
       submittingRef.current = false;
@@ -177,7 +190,7 @@ export function ImagePage({ section }: { section?: string }) {
   }
 
   function runSingle() {
-    if (!selected || !meta || limitBlocked || !canSubmit) return;
+    if (!selected || !meta || limitBlocked || icoError || !canSubmit) return;
     enqueue(selected, buildParams(form, meta, current), encode);
   }
 
@@ -195,7 +208,6 @@ export function ImagePage({ section }: { section?: string }) {
     }
   }, [items, selected]);
 
-  const params = buildParams(form, meta, current);
   const active = items.filter((i) => i.task.kind === 'image.process' && (i.status === 'running' || i.status === 'queued'));
   const finished = items.filter(
     (i) => i.task.kind === 'image.process' && (i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled'),
@@ -582,7 +594,19 @@ export function ImagePage({ section }: { section?: string }) {
             </label>
           </div>
 
-          {encode.format === 'ico' && <p className="hint">ICO 输出宽和高均不能超过 256 像素，可先在变换中缩放。</p>}
+          {encode.format === 'ico' && (
+            <div id={icoNoticeId} role="status">
+              {batch.length <= 1 && icoError
+                ? <p className="notice danger">{icoError}</p>
+                : <p className="hint">ICO 输出宽和高均不能超过 256 像素。批量处理会跳过超限图片。</p>}
+              {batchIcoErrors.length > 0 && (
+                <div className="notice danger">
+                  <p>以下 {batchIcoErrors.length} 张图片未提交：</p>
+                  <ul>{batchIcoErrors.map((message, index) => <li key={index}>{message}</li>)}</ul>
+                </div>
+              )}
+            </div>
+          )}
           {needsBackgroundNotice(meta, encode, params.canvas) && (
             <div style={{ marginTop: 12 }}>
               <LimitNotice kind="fidelity" title="透明图将转为不透明">
@@ -621,7 +645,8 @@ export function ImagePage({ section }: { section?: string }) {
             <button
               className="primary"
               type="button"
-              disabled={!selected || !canSubmit || submitting || (batch.length <= 1 && (!meta || !!limitBlocked))}
+              disabled={!selected || !canSubmit || submitting || (batch.length <= 1 && (!meta || !!limitBlocked || !!icoError))}
+              aria-describedby={encode.format === 'ico' ? icoNoticeId : undefined}
               onClick={() => void (batch.length > 1 ? runBatch() : runSingle())}
             >
               {submitting ? '正在准备批量任务…' : batch.length > 1 ? `批量处理 ${batch.length} 张` : '开始处理'}

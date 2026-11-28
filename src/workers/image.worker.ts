@@ -25,16 +25,11 @@ interface Glue {
     encodeJson: string,
     onProgress?: (done: number, total: number, phase: string) => void,
   ): Uint8Array;
-  process_image_with_meta(
-    input: Uint8Array,
-    paramsJson: string,
-    encodeJson: string,
-    onProgress?: (done: number, total: number, phase: string) => void,
-  ): string;
   make_output_name(stem: string, paramsJson: string, encodeJson: string): string;
   hash_bytes(input: Uint8Array): string;
   format_bytes(n: number): string;
   format_duration(s: number): string;
+  savings_text(inputBytes: number, outputBytes: number): string;
 }
 
 let glue: Glue | null = null;
@@ -178,15 +173,30 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
           return;
         }
 
+        // 只执行一次完整流水线。此前这里随后调用 process_image_with_meta，
+        // 导致 decode/transform/encode 被完整重跑一次；JPEG→GIF 的量化编码
+        // 尤其昂贵，看起来像卡死且进度没有继续。
         const out = glue.process_image(input, paramsJson, encodeJson, onProgress);
-        const resultMeta = JSON.parse(
-          glue.process_image_with_meta(input, paramsJson, encodeJson, undefined),
-        ) as ImageResultMeta;
 
-        // 复制到独立的 ArrayBuffer，才能 transfer（wasm 返回的 Uint8Array 底层是 wasm 内存）
+        // 复制到独立的 ArrayBuffer 后探测，避免调用元数据 API 重跑编码流水线。
         const bytes = new Uint8Array(out.length);
         bytes.set(out);
         const output = bytes.buffer;
+        const outProbe = JSON.parse(glue.probe_image_meta(bytes)) as ImageMeta;
+        const inputBytes = input.byteLength;
+        const outputBytes = bytes.byteLength;
+        const savingsRatio = inputBytes === 0 ? 0 : (inputBytes - outputBytes) / inputBytes;
+        const savingsText = glue.savings_text(inputBytes, outputBytes);
+        const resultMeta: ImageResultMeta = {
+          outFormat: outProbe.format as ImageResultMeta['outFormat'],
+          outWidth: outProbe.width,
+          outHeight: outProbe.height,
+          inputBytes,
+          outputBytes,
+          outputHash: glue.hash_bytes(bytes),
+          savingsRatio,
+          savingsText,
+        };
 
         const stem = msg.inputName.replace(/\.[^.]+$/, '') || 'output';
         const outputName = glue.make_output_name(stem, paramsJson, encodeJson);

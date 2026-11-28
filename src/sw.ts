@@ -13,9 +13,9 @@
 
 // 由 scripts/build-sw.mjs 在构建时注入：dist/assets 下全部 JS/CSS（含 worker chunk）。
 // 这些文件不在 index.html 的 <script> 标签里，解析 HTML 拿不到，必须显式预缓存。
-declare const self: ServiceWorkerGlobalScope & { __MT_EXTRA_ASSETS__?: string[] };
+declare const self: ServiceWorkerGlobalScope & { __MT_EXTRA_ASSETS__?: string[]; __MT_CACHE_VERSION__?: string };
 
-const CACHE_VERSION = 'v1-phase4-webcodecs';
+const CACHE_VERSION = self.__MT_CACHE_VERSION__ ?? 'dev';
 const SHELL_CACHE = `mt-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `mt-runtime-${CACHE_VERSION}`;
 
@@ -106,7 +106,6 @@ sw.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   if (!isSameOrigin(req.url) || mustNotCache(req.url)) return;
-  const url = new URL(req.url);
 
   // 导航请求（含 hash 路由的页面刷新）：network-first，拿到 304 即 0 字节
   if (req.mode === 'navigate') {
@@ -121,8 +120,8 @@ sw.addEventListener('fetch', (event) => {
           return network;
         } catch {
           return (
-            (await caches.match(SHELL_ENTRY)) ??
-            (await caches.match(req)) ??
+            (await caches.match(SHELL_ENTRY, { cacheName: SHELL_CACHE })) ??
+            (await caches.match(req, { cacheName: SHELL_CACHE })) ??
             Response.error()
           );
         }
@@ -138,8 +137,8 @@ sw.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cached =
-        (await caches.match(req, { ignoreSearch: true })) ??
-        (await caches.match(new Request(url.href), { ignoreSearch: true }));
+        (await caches.match(req.url, { cacheName: SHELL_CACHE })) ??
+        (await caches.match(req.url, { cacheName: RUNTIME_CACHE }));
       if (cached) return cached;
 
       try {

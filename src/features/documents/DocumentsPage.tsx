@@ -5,10 +5,11 @@ import { LimitNotice } from '../../components/LimitNotice';
 import { getBackend } from '../../lib/backend';
 import { submitTask } from '../../store/queue';
 import { formatBytes } from '../../lib/errors';
-import type { InputRef, ToolError } from '../../lib/backend/types';
+import type { InputRef, TaskResult, ToolError } from '../../lib/backend/types';
 import { useCapabilities } from '../../store/capabilities';
 
 type Direction = 'docx2pdf' | 'pdf2docx';
+type PendingOutput = Pick<TaskResult, 'bytes' | 'outputName'>;
 
 export function DocumentsPage({ direction }: { direction: Direction }) {
   const { caps, summary } = useCapabilities();
@@ -16,6 +17,7 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
   const accept = direction === 'docx2pdf' ? '.docx' : '.pdf';
   const [error, setError] = useState<ToolError | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [pendingOutput, setPendingOutput] = useState<PendingOutput | null>(null);
   const [busy, setBusy] = useState(false);
   const [downloadOpenFailed, setDownloadOpenFailed] = useState(false);
 
@@ -36,6 +38,7 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
   const adoptFiles = useCallback(([ref]: InputRef[]) => {
     if (!ref) return;
     setFile(ref);
+    setPendingOutput(null);
     setError(null);
     setResult(null);
   }, []);
@@ -53,29 +56,56 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
   const browserConversion = summary?.showBrowserGuidance && engine === 'structured';
   const conversionAvailable = isNative || browserConversion;
 
-  const run = useCallback(async () => {
-    if (!file || !conversionAvailable) return;
+  const save = async (out: PendingOutput) => {
+    const outcome = await (await getBackend()).saveOutput(out.bytes, out.outputName);
+    const description = `结构化结果已生成（${formatBytes(out.bytes.length)}，${out.outputName}）`;
+    if (outcome === 'cancelled') {
+      setResult(`已取消保存，文件未保存。${description}。`);
+      return;
+    }
+    setPendingOutput(null);
+    setResult(`${description}。${outcome === 'saved' ? '已保存。' : '已发起下载。'}`);
+  };
+
+  const retrySave = async () => {
+    if (!pendingOutput || busy) return;
+    setBusy(true);
+    setResult(null);
+    setError(null);
+    try {
+      await save(pendingOutput);
+    } catch (e) {
+      setError(e as ToolError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = async () => {
+    if (!file || busy || !conversionAvailable) return;
     setBusy(true);
     setError(null);
     setResult(null);
+    setPendingOutput(null);
     try {
       const out = await submitTask(
         isNative
           ? { kind: 'office.convert', input: file, direction }
           : { kind: 'office.structure', input: file, direction },
       );
-      await (await getBackend()).saveOutput(out.bytes, out.outputName);
-      setResult(
-        isNative
-          ? `已生成 ${out.outputName}（LibreOffice 原生转换）`
-          : `结构化结果已生成（${formatBytes(out.bytes.length)}，${out.outputName}）`,
-      );
+      if (isNative) {
+        setResult(`已生成 ${out.outputName}（LibreOffice 原生转换）`);
+      } else {
+        const { bytes, outputName } = out;
+        setPendingOutput({ bytes, outputName });
+        await save({ bytes, outputName });
+      }
     } catch (e) {
       setError(e as ToolError);
     } finally {
       setBusy(false);
     }
-  }, [file, direction, isNative, conversionAvailable]);
+  };
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -126,7 +156,14 @@ export function DocumentsPage({ direction }: { direction: Direction }) {
         </LimitNotice>
       )}
 
-      {result && <div className="notice info"><span>✓</span><div>{result}</div></div>}
+      <div role="status">
+        {result && <div className="notice info"><div>{result}</div></div>}
+      </div>
+      {pendingOutput && !busy && (
+        <div className="row">
+          <button type="button" className="btn ghost" onClick={() => void retrySave()}>重新保存</button>
+        </div>
+      )}
       {error && <ErrorBanner error={error} />}
 
     </div>

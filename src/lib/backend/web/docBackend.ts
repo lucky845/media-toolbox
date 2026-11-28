@@ -8,6 +8,7 @@
 // Word↔PDF 结构化转换：由前端 mammoth/pdf-lib/docx 完成（Phase 4 后续接入），
 // 这里先返回核心提示与结构化文本，UI 常驻保真度声明。
 
+import { wasmPairUrls } from './wasmPairUrls';
 import { PROTOCOL_VERSION, type DocWorkerPayload, type FromWorker, type ToWorker } from '../../../workers/protocol';
 import type {
   Backend,
@@ -22,12 +23,7 @@ import type {
 } from '../types';
 
 function wasmUrls(): { glue: string; wasm: string } {
-  const base = import.meta.env.BASE_URL || '/';
-  const prefix = base.endsWith('/') ? base : `${base}/`;
-  return {
-    glue: `${prefix}wasm/core_doc.js`,
-    wasm: `${prefix}wasm/core_doc_bg.wasm`,
-  };
+  return wasmPairUrls('doc');
 }
 
 interface Pending {
@@ -92,7 +88,7 @@ export class DocBackend implements Backend {
   private ready = false;
   private initPromise: Promise<void> | null = null;
   private pending = new Map<string, Pending>();
-  private probes = new Map<string, (m: unknown) => void>();
+  private probes = new Map<string, { resolve: (meta: unknown) => void; reject: (error: unknown) => void }>();
 
   private ensureWorker(): Worker {
     if (this.worker) return this.worker;
@@ -142,8 +138,7 @@ export class DocBackend implements Backend {
   private onMessage(m: FromWorker): void {
     switch (m.type) {
       case 'probed': {
-        const cb = this.probes.get(m.taskId);
-        if (cb) { this.probes.delete(m.taskId); cb(m.meta); }
+        this.probes.get(m.taskId)?.resolve(m.meta);
         return;
       }
       case 'progress':
@@ -171,13 +166,19 @@ export class DocBackend implements Backend {
       }
       case 'error':
       case 'cancelled': {
+        const error: ToolError = m.type === 'cancelled'
+          ? { code: 'CANCELLED', message: '已取消', retryable: false, desktopHint: false }
+          : m.error;
+        const probe = this.probes.get(m.taskId);
+        if (probe) {
+          probe.reject(error);
+          return;
+        }
         const p = this.pending.get(m.taskId);
         if (!p || p.settled) return;
         p.settled = true;
         this.pending.delete(m.taskId);
-        p.reject(m.type === 'cancelled'
-          ? { code: 'CANCELLED', message: '已取消', retryable: false, desktopHint: false }
-          : m.error);
+        p.reject(error);
         return;
       }
     }
@@ -213,18 +214,23 @@ export class DocBackend implements Backend {
     const buf = ref.file ? await ref.file.arrayBuffer() : new ArrayBuffer(0);
     const taskId = `probe-${Math.random().toString(36).slice(2, 10)}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const cleanup = () => {
+        clearTimeout(timer);
         this.probes.delete(taskId);
-        reject({ code: 'TIMEOUT', message: 'PDF 探测超时', retryable: true, desktopHint: false });
+      };
+      const probe = {
+        resolve: (meta: unknown) => { cleanup(); resolve(meta as PdfMeta); },
+        reject: (error: unknown) => { cleanup(); reject(error); },
+      };
+      const timer = setTimeout(() => {
+        probe.reject({ code: 'TIMEOUT', message: 'PDF 探测超时', retryable: true, desktopHint: false });
       }, 30_000);
-      this.probes.set(taskId, (meta) => { clearTimeout(timer); resolve(meta as PdfMeta); });
-      w.postMessage({
-        v: PROTOCOL_VERSION,
-        type: 'probe',
-        taskId,
-        input: buf,
-        inputName: ref.name,
-      } as ToWorker, [buf]);
+      this.probes.set(taskId, probe);
+      try {
+        w.postMessage({ v: PROTOCOL_VERSION, type: 'probe', taskId, input: buf, inputName: ref.name } as ToWorker, [buf]);
+      } catch (e) {
+        probe.reject(e);
+      }
     });
   }
 

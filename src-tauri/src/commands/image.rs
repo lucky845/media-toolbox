@@ -77,7 +77,9 @@ pub async fn image_process(
     // 这里按 phase 变化 + 每 5% 上报一次，足够顺滑且不刷爆 IPC。
     let app_for_progress = app.clone();
     // 用原子而不是捕获变量：ProgressSink 要求 Fn + Sync（rayon 多线程会并发上报）
-    let last_pct = std::sync::atomic::AtomicI32::new(-1);
+    // -1 表示不确定进度（例如 GIF 调色板量化）；用 -2 作为初始哨兵，
+    // 确保编码阶段的第一条不确定进度事件不会被吞掉。
+    let last_pct = std::sync::atomic::AtomicI32::new(-2);
     let progress = ProgressReporter::new(move |p: Progress| {
         let pct = if p.total > 0 {
             (p.done as f64 / p.total as f64 * 100.0) as i32

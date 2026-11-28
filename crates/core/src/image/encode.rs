@@ -371,6 +371,35 @@ mod tests {
     }
 
     #[test]
+    fn gif_encodes_jpeg_decoded_raster_without_reprocessing() {
+        let source = gradient(128, 128, 255);
+        let jpeg = encode(
+            &source,
+            &EncodeOptions {
+                format: ImageFormat::Jpeg,
+                quality: 85,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let decoded = crate::image::decode::decode_rgba(&jpeg).unwrap();
+        let gif = encode(
+            &decoded,
+            &EncodeOptions {
+                format: ImageFormat::Gif,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            crate::image::decode::sniff_format(&gif),
+            Some(ImageFormat::Gif)
+        );
+        let roundtrip = crate::image::decode::decode_rgba(&gif).unwrap();
+        assert_eq!((roundtrip.width, roundtrip.height), (128, 128));
+    }
+
+    #[test]
     fn gif_and_bmp_and_tiff_encode() {
         let img = gradient(16, 16, 255);
         for f in [ImageFormat::Gif, ImageFormat::Bmp, ImageFormat::Tiff] {

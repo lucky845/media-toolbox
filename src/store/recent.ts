@@ -1,10 +1,11 @@
 import type { ErrorCode } from '../lib/backend/types';
-import { useSettings } from './settings';
+import { canRecordHistory } from './settings';
 
 const DB_NAME = 'media-toolbox';
 const STORE = 'recent';
 const MAX_ITEMS = 100;
 const MAX_BYTES = 512 * 1024;
+const CHANGE_KEY = 'media-toolbox-recent-change';
 const listeners = new Set<() => void>();
 
 export interface RecentTask {
@@ -23,6 +24,26 @@ export interface RecentTask {
 export function onRecentChange(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
+}
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener());
+}
+
+function publishChange() {
+  try {
+    // Only an opaque invalidation signal crosses tabs, never task metadata.
+    localStorage.setItem(CHANGE_KEY, globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36));
+  } catch {
+    // The current tab can still refresh when localStorage is unavailable.
+  }
+  notifyListeners();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === CHANGE_KEY && event.storageArea === window.localStorage) notifyListeners();
+  });
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -53,22 +74,30 @@ function sizeOf(task: RecentTask): number {
 }
 
 export async function recordTask(task: RecentTask): Promise<void> {
-  if (!useSettings.getState().recordHistory || sizeOf(task) > MAX_BYTES / 4) return;
+  if (!canRecordHistory()) return;
   try {
+    if (sizeOf(task) > MAX_BYTES / 4) return;
+    let wrote = false;
     await withStore('readwrite', (store) => {
-      if (!useSettings.getState().recordHistory) return;
-      store.put(task);
-      const all = store.getAll();
-      all.onsuccess = () => {
-        const records = (all.result as RecentTask[]).sort((a, b) => b.createdAt - a.createdAt);
-        let bytes = 0;
-        records.forEach((record, index) => {
-          bytes += sizeOf(record);
-          if (index >= MAX_ITEMS || bytes > MAX_BYTES) store.delete(record.id);
-        });
+      // The transaction can be queued behind another tab. Check when it is active,
+      // not just while opening the database or listening for storage events.
+      const ready = store.getKey(task.id);
+      ready.onsuccess = () => {
+        if (!canRecordHistory()) return;
+        store.put(task);
+        wrote = true;
+        const all = store.getAll();
+        all.onsuccess = () => {
+          const records = (all.result as RecentTask[]).sort((a, b) => b.createdAt - a.createdAt);
+          let bytes = 0;
+          records.forEach((record, index) => {
+            bytes += sizeOf(record);
+            if (index >= MAX_ITEMS || bytes > MAX_BYTES) store.delete(record.id);
+          });
+        };
       };
     });
-    listeners.forEach((listener) => listener());
+    if (wrote) publishChange();
   } catch {
     // Processing remains available when IndexedDB is unavailable.
   }
@@ -85,7 +114,7 @@ export async function listTasks(): Promise<RecentTask[]> {
 
 async function mutateHistory(mutate: (store: IDBObjectStore) => void): Promise<void> {
   await withStore('readwrite', mutate);
-  listeners.forEach((listener) => listener());
+  publishChange();
 }
 
 export const deleteTask = (id: string) => mutateHistory((store) => { store.delete(id); });
