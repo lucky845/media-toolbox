@@ -180,40 +180,6 @@ pub fn compress<P: Parallel>(
     process_image(input, &ImageParams::default(), opts, ctx)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use media_ports::progress::NoopProgress;
-    use media_ports::{NeverCancel, SerialParallel};
-
-    #[test]
-    fn gif_encoding_reports_indeterminate_progress() {
-        let input = include_bytes!("../../../../tests/fixtures/gradient.png");
-        let parallel = SerialParallel;
-        let progress = NoopProgress;
-        let cancel = NeverCancel;
-        let limits = Limits::DESKTOP;
-        let ctx = Ctx {
-            parallel: &parallel,
-            progress: &progress,
-            cancel: &cancel,
-            limits: &limits,
-        };
-        let result = process_image(
-            input,
-            &ImageParams::default(),
-            &EncodeOptions {
-                format: ImageFormat::Gif,
-                ..Default::default()
-            },
-            &ctx,
-        )
-        .expect("PNG to GIF conversion should complete");
-        assert_eq!(result.out_format, ImageFormat::Gif);
-        assert!(!result.output.is_empty());
-    }
-}
-
 /// 输出文件名生成：`{原名}-{摘要}.{ext}`，重名由调用方加序号。
 pub fn output_name(
     original_stem: &str,
@@ -326,4 +292,38 @@ pub fn process_stage_decode<P: Parallel>(
         img = fill_canvas(&img, canvas)?;
     }
     Ok(img)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use media_ports::progress::NoopProgress;
+    use media_ports::{NeverCancel, SerialParallel};
+
+    #[test]
+    fn gif_encoding_reports_indeterminate_progress() {
+        let input = include_bytes!("../../../../tests/fixtures/gradient.png");
+        let parallel = SerialParallel;
+        let progress = NoopProgress;
+        let cancel = NeverCancel;
+        let limits = Limits::DESKTOP;
+        let ctx = Ctx {
+            parallel: &parallel,
+            progress: &progress,
+            cancel: &cancel,
+            limits: &limits,
+        };
+        let result = process_image(
+            input,
+            &ImageParams::default(),
+            &EncodeOptions {
+                format: ImageFormat::Gif,
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("PNG to GIF conversion should complete");
+        assert_eq!(result.out_format, ImageFormat::Gif);
+        assert!(!result.output.is_empty());
+    }
 }
