@@ -1,7 +1,7 @@
 {
   "name": "media-toolbox",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.2.6",
   "type": "module",
   "description": "本地多媒体与文档处理工具箱：一套核心，Web(wasm) 与 Tauri(native) 两个壳",
   "license": "MIT",
@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && npm run pdfjs && vite build && node scripts/build-sw.mjs",
     "build:only": "npm run pdfjs && vite build && node scripts/build-sw.mjs",
     "preview": "vite preview --port 4173",
+    "smoke:video": "node scripts/smoke-video-transcode.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

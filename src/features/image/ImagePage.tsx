@@ -62,9 +62,7 @@ export function ImagePage({ section }: { section?: string }) {
   const [colorPreset, setColorPreset] = useState<'original' | 'grayscale' | 'soft' | 'vivid' | 'custom'>('original');
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const previewRef = useRef<string | null>(null);
-  const [result, setResult] = useState<{ url: string; bytes: number } | null>(null);
-  const resultRef = useRef<string | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
 
   // 单值选择器（避免 store 整体变化触发无限重渲染）
   const items = useQueue((s) => s.items);
@@ -77,13 +75,27 @@ export function ImagePage({ section }: { section?: string }) {
     setForm((f) => ({ ...f, filter: settings.filter }));
   }, [settings.filter]);
 
-  // 清理 object URL
   useEffect(() => {
+    let disposed = false;
+    let url: string | undefined;
+    setPreviewUrl(null);
+    if (selected && !/\.(qoi|tiff?)$/i.test(selected.name)) {
+      void (async () => {
+        try {
+          const bytes = selected.file ?? await (await getBackend()).readImagePreview?.(selected);
+          if (!bytes || disposed) return;
+          url = URL.createObjectURL(bytes instanceof Blob ? bytes : new Blob([bytes]));
+          setPreviewUrl(url);
+        } catch {
+          // Metadata and processing remain available if the preview cannot be read.
+        }
+      })();
+    }
     return () => {
-      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-      if (resultRef.current) URL.revokeObjectURL(resultRef.current);
+      disposed = true;
+      if (url) URL.revokeObjectURL(url);
     };
-  }, []);
+  }, [selected]);
 
   const probe = useCallback(
     async (ref: InputRef) => {
@@ -119,14 +131,8 @@ export function ImagePage({ section }: { section?: string }) {
     async (refs: InputRef[]) => {
       if (refs.length === 0) return;
       const first = refs[0]!;
-      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-      previewRef.current = first.file && !/\.qoi$/i.test(first.name) ? URL.createObjectURL(first.file) : null;
-      setPreviewUrl(previewRef.current);
-      if (resultRef.current) URL.revokeObjectURL(resultRef.current);
-      resultRef.current = null;
       setSelected(first);
       setBatch(refs);
-      setResult(null);
       await probe(first);
     },
     [probe],
@@ -164,12 +170,13 @@ export function ImagePage({ section }: { section?: string }) {
     setSubmitting(true);
     setBatchIcoErrors([]);
     try {
-      const backend = await getBackend();
+      const needsDimensions = encode.format === 'ico' || (showTransform && (form.cropEnabled || form.scalePercent !== 100));
+      const backend = needsDimensions ? await getBackend() : undefined;
       const prepared = [];
       const errors: string[] = [];
       for (const ref of batch) {
         let refMeta = ref === selected ? meta : null;
-        if (!refMeta && backend.probe) {
+        if (!refMeta && backend?.probe) {
           try {
             refMeta = (await backend.probe(ref)) as ImageMeta;
           } catch {
@@ -194,20 +201,21 @@ export function ImagePage({ section }: { section?: string }) {
     enqueue(selected, buildParams(form, meta, current), encode);
   }
 
-  // 取最新成功结果用于对比预览
+  const latest = [...items].reverse().find((i) => i.status === 'succeeded' && i.task.kind === 'image.process' && i.task.input === selected)?.result;
   useEffect(() => {
-    const latest = [...items].reverse().find((i) => i.status === 'succeeded' && i.task.kind === 'image.process' && i.task.input === selected)?.result;
-    if (latest?.bytes.length && latest.meta.outFormat !== 'qoi') {
-      if (resultRef.current) URL.revokeObjectURL(resultRef.current);
+    setResultUrl(null);
+    if (latest?.bytes.length && latest.meta.outFormat !== 'qoi' && latest.meta.outFormat !== 'tiff') {
       const blob = new Blob([latest.bytes.slice().buffer as ArrayBuffer], {
         type: latest.meta.outFormat === 'ico' ? 'image/x-icon' : `image/${latest.meta.outFormat}`,
       });
       const url = URL.createObjectURL(blob);
-      resultRef.current = url;
-      setResult({ url, bytes: latest.bytes.length });
+      setResultUrl(url);
+      return () => URL.revokeObjectURL(url);
     }
-  }, [items, selected]);
+  }, [latest]);
 
+  const batchBytes = batch.reduce((sum, ref) => sum + ref.size, 0);
+  const batchBytesKnown = batch.every((ref) => ref.size > 0);
   const active = items.filter((i) => i.task.kind === 'image.process' && (i.status === 'running' || i.status === 'queued'));
   const finished = items.filter(
     (i) => i.task.kind === 'image.process' && (i.status === 'succeeded' || i.status === 'failed' || i.status === 'cancelled'),
@@ -217,7 +225,11 @@ export function ImagePage({ section }: { section?: string }) {
     <div className="col" style={{ gap: 16 }}>
       <div className="card">
         <h2>导入</h2>
-        {batch.length > 1 && <p className="hint" role="status">已选 {batch.length} 张图片；调整下方参数后可统一批量处理。</p>}
+        {batch.length > 1 && (
+          <p className="hint" role="status">
+            已选 {batch.length} 张图片{batchBytesKnown ? `，共 ${formatBytes(batchBytes)}` : ''}；调整下方参数后可统一批量处理。
+          </p>
+        )}
         {exceedsBatchLimit && <p role="alert">单批最多处理 {limits?.maxBatch} 张图片，请分批导入。</p>}
         <DropZone accept={ACCEPT} onFiles={handleFiles}
           onNativeFiles={caps?.fileSystem.nativeFilePicker ? adoptFiles : undefined} onPick={handlePick} />
@@ -233,7 +245,7 @@ export function ImagePage({ section }: { section?: string }) {
       {selected && (
           <div className="card">
             <h2>源文件</h2>
-            <PreviewCompare before={previewUrl} after={result?.url ?? null} />
+            <PreviewCompare before={previewUrl} after={resultUrl} />
             <p className="source-filename">{selected.name}</p>
             {(meta?.format === 'qoi' || encode.format === 'qoi') && <p className="hint">此处无法预览 QOI，处理后的文件可在任务列表下载。</p>}
             {meta && (

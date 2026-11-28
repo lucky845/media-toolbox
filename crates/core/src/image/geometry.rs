@@ -114,12 +114,16 @@ pub fn flip(img: &RasterImage, mode: Flip) -> Result<RasterImage> {
 /// 用于「透明 PNG → JPEG」这类目标格式不支持 alpha 的场景。
 /// 公式：`out = fg * a + bg * (1 - a)`，与浏览器 canvas 的 source-over 一致。
 pub fn flatten_background(img: &RasterImage, bg: Rgba8) -> RasterImage {
+    flatten_background_owned(img.clone(), bg)
+}
+
+/// Consume an image while compositing alpha to avoid copying its RGBA allocation.
+pub(crate) fn flatten_background_owned(mut img: RasterImage, bg: Rgba8) -> RasterImage {
     if img.is_opaque() {
         // 全不透明就不做任何合成，避免量化误差
-        return img.clone();
+        return img;
     }
-    let mut data = img.data.clone();
-    for p in data.chunks_exact_mut(4) {
+    for p in img.data.chunks_exact_mut(4) {
         let a = p[3] as u32;
         if a == 255 {
             continue;
@@ -131,11 +135,7 @@ pub fn flatten_background(img: &RasterImage, bg: Rgba8) -> RasterImage {
         p[2] = ((p[2] as u32 * a + bg.b as u32 * inv + 127) / 255) as u8;
         p[3] = 255;
     }
-    RasterImage {
-        width: img.width,
-        height: img.height,
-        data,
-    }
+    img
 }
 
 /// 把图片原尺寸居中叠到新画布，奇数边距向右/下多留一个像素。

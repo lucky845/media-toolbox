@@ -52,12 +52,12 @@
 
 ---
 
-## v0.2.5 更新
+## v0.2.6 更新
 
-- 清除已完成任务不会丢掉待保存结果，历史记录开关在同源标签页之间同步。
-- 图片转 ICO 前显示预计输出尺寸；JPEG 转 GIF 改善进度反馈，已完成任务显示实际输出文件名。
-- PDF 会说明执行按钮为何禁用，并立即报告损坏文件；视频页可直接取消排队任务或恢复队列。
-- 桌面文档转换保护已有文件；Web 文档取消保存后可重新保存，不必重新转换。
+- 图片缩放与裁剪降低中间像素缓冲区占用，桌面端可对比原图和转换结果。
+- 修复 WebKit 环境的 PDF.js 预览兼容问题，并清除桌面端旧 Service Worker 缓存。
+- 修复在线 MP4 样本解析与降帧时间戳，桌面转码显示输入和输出大小。
+- 增加浏览器视频转码 smoke test，验证 B 帧、AAC 音轨、WebM 和降帧输出。
 
 [查看完整更新日志](CHANGELOG.md)
 
@@ -245,14 +245,20 @@ cd src-tauri && npm run tauri dev                           # 或 cargo tauri de
 ## 测试
 
 ```bash
-cargo test --workspace                 # Rust：212 个测试（含 native 真实 ffmpeg 集成测试）
-(cd src-tauri && cargo test --lib)      # Tauri command：6 个测试
-npm test                               # 前端：16 个测试
+cargo test --workspace                 # Rust 单元与集成测试，含 FFmpeg 集成测试
+(cd src-tauri && cargo test --lib)      # 桌面端 Tauri 命令测试
+npm test                               # 前端单元测试
 node scripts/run-conformance.mjs       # 图片双端一致性：21 个用例，逐字节相等
 node scripts/run-pdf-conformance.mjs   # PDF 双端一致性：3 个用例（需先 build 两个程序）
 node scripts/benchmark.mjs             # B1 基准：12 MP lanczos native vs wasm（3 次取中位数）
 node scripts/verify-single-source.mjs  # 「一处改两端生效」的机器验证
 node tests/e2e/smoke.mjs http://localhost:4173  # 真实浏览器端到端（另有 pdf/pdf-render/video/documents/offline/mime-fallback）
+```
+
+运行视频 smoke test 前，安装 Chrome 和带 libx264 的 FFmpeg（含 ffprobe）。执行 `npm run build`，启动 `npm run preview`，然后在另一终端运行以下命令。
+
+```bash
+npm run smoke:video -- http://localhost:4173
 ```
 
 CI 闸门（三个 workflow 自动跑）：

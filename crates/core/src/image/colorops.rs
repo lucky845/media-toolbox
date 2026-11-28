@@ -28,6 +28,10 @@ pub fn build_bc_lut(brightness: f32, contrast: f32) -> [u8; 256] {
 
 /// 应用亮度/对比度/饱和度。
 pub fn adjust(img: &RasterImage, a: &Adjust) -> RasterImage {
+    if a.brightness == 1.0 && a.contrast == 1.0 && a.saturation == 1.0 {
+        return img.clone();
+    }
+
     if a.is_identity() {
         return img.clone();
     }

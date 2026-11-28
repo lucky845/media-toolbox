@@ -10,6 +10,7 @@ use media_core::image::pipeline::Ctx;
 use media_native::cancel::TaskGuard;
 use media_native::ProgressReporter;
 use media_native::{read_limited, write_atomic, RayonParallel};
+use media_ports::codec::ImageFormat;
 use media_ports::progress::Progress;
 use media_ports::{Limits, ToolError};
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ pub struct ImageProcessResult {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageResultMeta {
-    pub out_format: String,
+    pub out_format: ImageFormat,
     pub out_width: u32,
     pub out_height: u32,
     pub input_bytes: u64,
@@ -53,13 +54,13 @@ pub struct ImageProcessArgs {
 /// 读取图片元数据，只通过 IPC 返回探测结果。
 #[tauri::command]
 pub async fn image_probe(input_path: String) -> Result<ImageMeta, ToolError> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let limits = desktop_limits();
-        let input = read_limited(&input_path, limits.max_bytes)?;
-        media_core::image::pipeline::probe_image(&input, &limits)
+        let input = read_limited(input_path, limits.max_bytes)?;
+        media_core::image::probe_image(&input, &limits)
     })
     .await
-    .map_err(|e| ToolError::internal(format!("Image probe task failed: {e}")))?
+    .map_err(|e| ToolError::internal(format!("图片探测失败: {e}")))?
 }
 
 #[tauri::command]
@@ -150,11 +151,14 @@ pub async fn image_process(
         }
     };
 
+    if guard.token().is_cancelled() {
+        return Err(ToolError::cancelled());
+    }
     let out_str = out_path.to_string_lossy().into_owned();
     write_atomic(&out_path, &output.output)?;
 
     let meta = ImageResultMeta {
-        out_format: output.out_format.extension().to_string(),
+        out_format: output.out_format,
         out_width: output.out_width,
         out_height: output.out_height,
         input_bytes: output.input_bytes,
@@ -177,18 +181,13 @@ pub async fn image_process(
     })
 }
 
-/// 读取输出文件用于预览（只读前 N 字节，避免大图占满内存）。
+/// 只传输可完整读取且不超过预算的图片。
 #[tauri::command]
-pub fn read_output_preview(path: String) -> Result<Vec<u8>, ToolError> {
+pub async fn read_output_preview(path: String) -> Result<tauri::ipc::Response, ToolError> {
     const MAX_PREVIEW: u64 = 8 * 1024 * 1024; // 8 MB
-    let meta = std::fs::metadata(&path).map_err(|e| ToolError::io(format!("读取失败: {e}")))?;
-    if meta.len() > MAX_PREVIEW {
-        return Err(
-            ToolError::new(media_ports::ErrorCode::InputTooLarge, &[("limit", "8 MB")])
-                .with_detail("预览文件过大；完整文件已写入磁盘，可用系统查看器打开"),
-        );
-    }
-    std::fs::read(&path).map_err(|e| ToolError::io(format!("读取失败: {e}")))
+    tokio::task::spawn_blocking(move || read_limited(path, MAX_PREVIEW).map(tauri::ipc::Response::new))
+        .await
+        .map_err(|e| ToolError::internal(format!("图片预览读取失败: {e}")))?
 }
 
 /// 写输出文件（用于「另存为」）。数据量小（用户主动保存单个结果）。

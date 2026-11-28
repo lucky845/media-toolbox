@@ -329,10 +329,11 @@ export interface Backend {
   /** 释放资源（worker / 事件监听） */
   dispose(): void;
   /**
-   * 只读探测（不解码像素）。可选：桌面端也可以实现，但 Phase 1 只有 Web 侧用到。
+   * 只读探测（图片或文档元数据，不解码像素）。
    * 放在接口上而不是让 UI 去 import 具体类是刻意的 —— 否则 features/ 就会依赖 Web 实现。
    */
   probe?(ref: InputRef): Promise<unknown>;
+  readImagePreview?(ref: InputRef): Promise<ArrayBuffer>;
   /** PDF 结构探测：Web 与 Tauri 共用统一页面流程。 */
   probePdf?(ref: InputRef): Promise<PdfMeta>;
   /** PDF 图片预览读取：桌面端从本地路径读取，Web 直接使用 File。 */
@@ -344,6 +345,8 @@ export interface Backend {
 /** 视频转码结果元数据（两端同形状） */
 export interface VideoResultMeta {
   outputPath?: string;
+  inputBytes?: number;
+  outputBytes?: number;
   outFormat: 'mp4' | 'webm';
   outWidth: number;
   outHeight: number;

@@ -228,6 +228,19 @@ pub fn prepare_for_format(img: &RasterImage, opts: &EncodeOptions, bg: Rgba8) ->
     }
 }
 
+/// Consume the image before encoding, preserving its allocation when no transformation is needed.
+pub(crate) fn prepare_for_format_owned(
+    img: RasterImage,
+    opts: &EncodeOptions,
+    bg: Rgba8,
+) -> RasterImage {
+    if opts.drops_alpha() && !img.is_opaque() {
+        crate::image::geometry::flatten_background_owned(img, bg)
+    } else {
+        img
+    }
+}
+
 /// 用 sRGB 的简单 box 降采样生成缩略图（仅用于预览，非质量路径）。
 pub fn thumbnail(img: &RasterImage, max_side: u32) -> Result<RasterImage> {
     let longest = img.width.max(img.height);
@@ -546,5 +559,26 @@ mod tests {
         );
         assert!(hi > lo);
         assert!(lo > 0);
+    }
+
+    #[test]
+    fn owned_noop_format_preparation_keeps_pixel_allocation() {
+        let img = gradient(2, 2, 255);
+        let ptr = img.data.as_ptr();
+        let out = prepare_for_format_owned(img, &EncodeOptions::default(), Rgba8::default());
+        assert_eq!(out.data.as_ptr(), ptr);
+    }
+
+    #[test]
+    fn owned_alpha_flatten_keeps_pixel_allocation() {
+        let img = gradient(2, 2, 128);
+        let ptr = img.data.as_ptr();
+        let opts = EncodeOptions {
+            format: ImageFormat::Jpeg,
+            ..Default::default()
+        };
+        let out = prepare_for_format_owned(img, &opts, Rgba8::default());
+        assert_eq!(out.data.as_ptr(), ptr);
+        assert!(out.is_opaque());
     }
 }

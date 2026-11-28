@@ -8,7 +8,7 @@
  * 4. 文件不离开本机；取消时关闭解码器/编码器、停止解封装并抛出 CANCELLED；
  *    所有错误映射为中文 ToolError，需要桌面版的置 desktopHint=true。
  *
- * 性能：解码/编码由浏览器内部线程完成；帧回调用 Promise 链串行化并做编码队列背压，
+ * 性能：解码/编码由浏览器内部线程完成；限制解码积压和编码队列，
  * 每帧结束 close()，避免大量 VideoFrame 常驻内存。
  */
 
@@ -36,7 +36,6 @@ function asToolError(e: unknown): ToolError {
 
 interface RawSample {
   cts: number;
-  dts: number;
   duration: number;
   timescale: number;
   data: Uint8Array;
@@ -44,14 +43,13 @@ interface RawSample {
 }
 
 interface ParsedMp4 {
-  buffer: ArrayBuffer;
-  mp4: MP4Box.ISOFile;
+  buffer: MP4Box.MP4BoxBuffer;
   movie: MP4Box.Movie;
   video: MP4Box.Track;
   audio?: MP4Box.Track;
 }
 
-interface Demuxed extends ParsedMp4 {
+interface Demuxed {
   videoDescription?: Uint8Array;
   videoSamples: RawSample[];
   audioSamples: RawSample[];
@@ -72,10 +70,6 @@ function avcDescription(mp4: MP4Box.ISOFile, trackId: number, buffer: ArrayBuffe
   return new Uint8Array(buffer.slice(from, to));
 }
 
-function isMp4Name(name: string): boolean {
-  return /\.mp4$/i.test(name) || /video\/mp4/i.test(name);
-}
-
 /** Race an asynchronous stage with interruption, even when the browser API has no signal support. */
 function waitForVideoStep<T>(step: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -91,7 +85,7 @@ function waitForVideoStep<T>(step: Promise<T>, signal: AbortSignal): Promise<T> 
 
 /** 解析容器（不解码），供 probe 与 run 共用。 */
 async function parseMp4(file: File, signal?: AbortSignal): Promise<ParsedMp4> {
-  if (!isMp4Name(file.name)) {
+  if (!/\.mp4$/i.test(file.name) && file.type !== 'video/mp4') {
     throw toolError(
       'UNSUPPORTED_FORMAT',
       '在线版只能读取 MP4 文件',
@@ -100,23 +94,24 @@ async function parseMp4(file: File, signal?: AbortSignal): Promise<ParsedMp4> {
     );
   }
   const read = file.arrayBuffer();
-  const buffer = await (signal ? waitForVideoStep(read, signal) : read);
+  const buffer = (await (signal ? waitForVideoStep(read, signal) : read)) as MP4Box.MP4BoxBuffer;
   signal?.throwIfAborted();
+  buffer.fileStart = 0;
   const mp4 = MP4Box.createFile();
-  let resolveReady!: (m: MP4Box.Movie) => void;
-  let rejectReady!: (e: unknown) => void;
-  const ready = new Promise<MP4Box.Movie>((res, rej) => {
-    resolveReady = res;
-    rejectReady = rej;
-  });
-  mp4.onError = (e: unknown) => rejectReady(toolError('DECODE_FAILED', 'MP4 解析失败', String(e), true));
-  mp4.onReady = (m: MP4Box.Movie) => resolveReady(m);
-  // mp4box 给 ArrayBuffer 加了 fileStart 属性（offset）来定位 append 位置。
-  const mp4Buffer = buffer as ArrayBuffer & { fileStart: number };
-  mp4Buffer.fileStart = 0;
-  mp4.appendBuffer(mp4Buffer as unknown as Parameters<MP4Box.ISOFile['appendBuffer']>[0]);
-  mp4.flush();
-  const movie = await (signal ? waitForVideoStep(ready, signal) : ready);
+  let movie: MP4Box.Movie | undefined;
+  let parseError: string | undefined;
+  mp4.onReady = (info) => { movie = info; };
+  mp4.onError = (_module, message) => { parseError = message; };
+  try {
+    mp4.appendBuffer(buffer);
+    mp4.flush();
+  } catch (error) {
+    throw toolError('DECODE_FAILED', 'MP4 解析失败', String(error), true);
+  }
+  if (parseError) throw toolError('DECODE_FAILED', 'MP4 解析失败', parseError, true);
+  if (!movie) {
+    throw toolError('DECODE_FAILED', 'MP4 解析失败', '文件缺少完整的视频容器元数据。', true);
+  }
   const video = movie.videoTracks[0];
   if (!video) {
     throw toolError('INVALID_PARAMS', '文件里没有视频轨道', '请使用包含 H.264 视频的 MP4。', true);
@@ -129,45 +124,19 @@ async function parseMp4(file: File, signal?: AbortSignal): Promise<ParsedMp4> {
       true,
     );
   }
-  return { buffer, mp4, movie, video, audio: movie.audioTracks[0] };
+  return { buffer, movie, video, audio: movie.audioTracks[0] };
 }
 
-/** 提取视频/音频样本（压缩码流，尚未解码）。
- *  mp4box 的 `start()` 是异步分批回调 onSamples 的，必须等所有样本收齐（或超时）再返回，
- *  否则会拿到空数组导致「视频轨为空」。
- */
-function extractSamples(parsed: ParsedMp4, signal: AbortSignal, timeoutMs = 10_000): Promise<Demuxed> {
-  signal.throwIfAborted();
-  const { buffer, video, audio } = parsed;
+/** MP4Box 同步处理完整缓冲区，在 appendBuffer/flush 期间分批交付压缩样本。 */
+function extractSamples(parsed: ParsedMp4, keepAudio: boolean): Demuxed {
+  const { buffer, video } = parsed;
+  const audio = keepAudio ? parsed.audio : undefined;
   const videoSamples: RawSample[] = [];
   const audioSamples: RawSample[] = [];
-  const wantVideo = video.nb_samples || 0;
-  const wantAudio = audio?.nb_samples || 0;
-  let resolveDone!: (d: Demuxed) => void;
-  let rejectDone!: (e: unknown) => void;
-  const done = new Promise<Demuxed>((res, rej) => {
-    resolveDone = res;
-    rejectDone = rej;
-  });
-
-  const finish = () => {
-    if (!videoSamples.length) {
-      rejectDone(toolError('DECODE_FAILED', '视频轨为空', 'MP4 中没有可提取的视频样本。', true));
-      return;
-    }
-    resolveDone({
-      ...parsed,
-      videoDescription: avcDescription(extractor, video.id, parsed.buffer),
-      videoSamples,
-      audioSamples,
-    });
-  };
-
-  // mp4box 的样本回调发生在 appendBuffer/flush 处理数据时。parseMp4 已经把数据 append+flush
-  // 过一遍（只为拿 onReady 元数据），那个实例不会再产出样本；必须用新实例在 onReady 里
-  // 设置提取选项 + start()，再重新 append 数据，onSamples 才会被触发。
+  // 元数据探测会丢弃已读取的媒体数据。重新解析并在读取期间收集样本。
   const extractor = MP4Box.createFile();
-  extractor.onError = (e: unknown) => rejectDone(toolError('DECODE_FAILED', '视频样本提取失败', String(e), true));
+  let extractionError: string | undefined;
+  extractor.onError = (_module, message) => { extractionError = message; };
   extractor.onSamples = (id, _user, samples) => {
     const dest = id === video.id ? videoSamples : id === audio?.id ? audioSamples : null;
     if (!dest) return;
@@ -175,38 +144,35 @@ function extractSamples(parsed: ParsedMp4, signal: AbortSignal, timeoutMs = 10_0
       if (!s.data) continue;
       dest.push({
         cts: s.cts,
-        dts: s.dts,
         duration: s.duration,
         timescale: s.timescale,
-        data: new Uint8Array(s.data),
+        // MP4Box allocates a separate buffer per sample; keep that buffer, not a copy.
+        data: s.data,
         isKey: s.is_sync === true,
       });
     }
-    // 两个轨道都收齐后结束；无音轨时只等视频。
-    const videoReady = wantVideo > 0 ? videoSamples.length >= wantVideo : videoSamples.length > 0;
-    const audioReady = !audio || (wantAudio > 0 ? audioSamples.length >= wantAudio : audioSamples.length > 0);
-    if (videoReady && audioReady) finish();
   };
   extractor.onReady = () => {
-    extractor.setExtractionOptions(video.id, null, { nbSamples: 1000 });
-    if (audio) extractor.setExtractionOptions(audio.id, null, { nbSamples: 1000 });
+    extractor.setExtractionOptions(video.id, null, { nbSamples: Math.max(1, video.nb_samples || 1) });
+    if (audio) extractor.setExtractionOptions(audio.id, null, { nbSamples: Math.max(1, audio.nb_samples || 1) });
     extractor.start();
   };
-  const mp4Buffer = buffer as ArrayBuffer & { fileStart: number };
-  mp4Buffer.fileStart = 0;
-  // 兜底：某些 MP4 的 nb_samples 不可靠，超时后用已收到的样本继续。
-  const timer = setTimeout(finish, timeoutMs);
-  const result = waitForVideoStep(done, signal).finally(() => {
-    clearTimeout(timer);
-    extractor.stop();
-  });
   try {
-    extractor.appendBuffer(mp4Buffer as unknown as Parameters<MP4Box.ISOFile['appendBuffer']>[0]);
+    extractor.appendBuffer(buffer);
     extractor.flush();
   } catch (error) {
-    rejectDone(error);
+    throw toolError('DECODE_FAILED', '视频样本提取失败', String(error), true);
+  } finally {
+    extractor.stop();
   }
-  return result;
+  if (extractionError) throw toolError('DECODE_FAILED', '视频样本提取失败', extractionError, true);
+  if (!videoSamples.length) {
+    throw toolError('DECODE_FAILED', '视频轨为空', 'MP4 中没有可提取的视频样本。', true);
+  }
+  if (videoSamples.length < video.nb_samples || (audio && audioSamples.length < audio.nb_samples)) {
+    throw toolError('DECODE_FAILED', '视频样本提取失败', '文件缺少轨道声明的媒体样本。', true);
+  }
+  return { videoDescription: avcDescription(extractor, video.id, buffer), videoSamples, audioSamples };
 }
 
 function sampleUs(s: RawSample): { timestamp: number; duration: number } {
@@ -358,7 +324,9 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
   const outH = Math.max(2, Math.round((srcH * scale) / 100 / 2) * 2);
   const videoSec = decoded.video.timescale > 0 ? decoded.video.duration / decoded.video.timescale : durationSec;
   const srcFps = videoSec > 0 ? decoded.video.nb_samples / videoSec : 30;
-  const fps = Math.min(60, Math.max(0, Math.round(params.fps)));
+  const requestedFps = Math.min(60, Math.max(0, Math.round(params.fps)));
+  const targetFps = requestedFps > 0 && requestedFps < srcFps ? requestedFps : 0;
+  const outputFps = targetFps || srcFps || 30;
   const bitrateMbps = Math.min(12, Math.max(0.4, params.bitrateMbps));
   const bitrate = Math.round(bitrateMbps * 1_000_000);
 
@@ -366,13 +334,13 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
     AUDIO_PASSTHROUGH_CODECS.has(decoded.audio?.codec ?? '');
 
   const { codec: encoderCodec, config: encoderConfig } = await waitForVideoStep(
-    chooseEncoder(params.container, outW, outH, fps || srcFps || 30, bitrate, signal), signal,
+    chooseEncoder(params.container, outW, outH, outputFps, bitrate, signal), signal,
   );
   signal.throwIfAborted();
   opts.onLog?.({ level: 'info', message: `编码器：${encoderCodec}，${outW}×${outH}，${bitrateMbps} Mbps`, at: Date.now() });
   if (params.container === 'webm' && decoded.audio) {
     opts.onLog?.({ level: 'warn', message: 'WebM 输出需要 Opus 音轨，在线版不重编码音频，将输出无音轨视频。', at: Date.now() });
-  } else if (decoded.audio && !keepAudio) {
+  } else if (params.keepAudio && decoded.audio && !keepAudio) {
     opts.onLog?.({ level: 'warn', message: '源音轨格式无法直接透传，将输出无音轨视频。', at: Date.now() });
   }
 
@@ -383,7 +351,7 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
   if (params.container === 'mp4') {
     const m = new Mp4Muxer({
       target: mp4Target,
-      video: { codec: 'avc', width: outW, height: outH, frameRate: fps || srcFps || 30 },
+      video: { codec: 'avc', width: outW, height: outH, frameRate: outputFps },
       audio: keepAudio
         ? {
             codec: 'aac',
@@ -403,65 +371,105 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
         codec: encoderCodec === 'vp8' ? 'V_VP8' : 'V_VP9',
         width: outW,
         height: outH,
-        frameRate: fps || srcFps || 30,
+        frameRate: outputFps,
       },
       firstTimestampBehavior: 'offset',
     });
   }
 
   opts.onProgress({ done: 0, total: 1, phase: 'decoding', unit: 'frames' });
-  const extracted = await extractSamples(decoded, signal);
   signal.throwIfAborted();
+  const extracted = extractSamples(decoded, keepAudio);
 
   let decoder: VideoDecoder | undefined;
   let encoder: VideoEncoder | undefined;
-  let backgroundError: unknown;
-  const minFrameGap = fps > 0 ? 1_000_000 / fps : 0;
-  let lastOutTs = -Infinity;
-  let encodedCount = 0;
-  let chain: Promise<void> = Promise.resolve();
+  let failure: unknown;
+  const frames: VideoFrame[] = [];
+  let draining: Promise<void> | undefined;
+  const queueLimit = 8;
+  const closeCodecs = () => {
+    if (decoder && decoder.state !== 'closed') decoder.close();
+    if (encoder && encoder.state !== 'closed') encoder.close();
+  };
+  const disposeFrames = () => {
+    for (const frame of frames) frame.close();
+    frames.length = 0;
+  };
+  const fail = (error: unknown) => {
+    failure ??= error;
+    disposeFrames();
+    closeCodecs();
+  };
+  const checkFailure = () => {
+    if (failure) throw failure;
+  };
+  const onAbort = () => fail(signal.reason);
+  signal.addEventListener('abort', onAbort, { once: true });
 
-  const encodeFrame = async (frame: VideoFrame) => {
-    if (signal.aborted) { frame.close(); return; }
-    const ts = frame.timestamp;
-    if (minFrameGap > 0 && ts - lastOutTs < minFrameGap - 500) {
+  let firstFrameTime: number | undefined;
+  let lastFrameSlot = -1;
+  let processedCount = 0;
+  let canvas: OffscreenCanvas | undefined;
+
+  const encodeFrame = (frame: VideoFrame) => {
+    let outputFrame: VideoFrame | undefined;
+    try {
+      firstFrameTime ??= frame.timestamp;
+      let timestamp = frame.timestamp;
+      let duration = frame.duration ?? undefined;
+      if (targetFps) {
+        // Pick one frame per output interval relative to the first frame.
+        // One microsecond of tolerance handles integer WebCodecs timestamps.
+        const slot = Math.floor((timestamp - firstFrameTime + 1) * targetFps / 1_000_000);
+        if (slot === lastFrameSlot) return;
+        const start = Math.round(slot * 1_000_000 / targetFps);
+        timestamp = firstFrameTime + start;
+        duration = Math.round((slot + 1) * 1_000_000 / targetFps) - start;
+        lastFrameSlot = slot;
+      }
+      if (frame.displayWidth !== outW || frame.displayHeight !== outH) {
+        canvas ??= new OffscreenCanvas(outW, outH);
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) throw toolError('ENCODE_FAILED', '无法创建 2D 画布');
+        ctx.drawImage(frame, 0, 0, outW, outH);
+        outputFrame = new VideoFrame(canvas, { timestamp, duration });
+      } else if (targetFps) {
+        outputFrame = new VideoFrame(frame, { timestamp, duration });
+      }
+      encoder!.encode(outputFrame ?? frame);
+    } finally {
+      outputFrame?.close();
       frame.close();
-      return;
     }
-    lastOutTs = ts;
-    let toEncode: VideoFrame = frame;
-    if (frame.displayWidth !== outW || frame.displayHeight !== outH) {
-      const canvas = new OffscreenCanvas(outW, outH);
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (!ctx) { frame.close(); throw toolError('ENCODE_FAILED', '无法创建 2D 画布'); }
-      ctx.drawImage(frame, 0, 0, outW, outH);
-      toEncode = new VideoFrame(canvas, { timestamp: ts, duration: frame.duration ?? undefined });
-      frame.close();
+  };
+
+  const drainFrames = async () => {
+    while (frames.length && !failure) {
+      if (encoder!.encodeQueueSize >= queueLimit) {
+        await sleep0();
+      } else {
+        encodeFrame(frames.shift()!);
+        opts.onProgress({
+          done: ++processedCount,
+          total: extracted.videoSamples.length,
+          phase: 'encoding',
+          unit: 'frames',
+        });
+      }
     }
-    while (!signal.aborted && (encoder?.encodeQueueSize ?? 0) > 8) await sleep0();
-    if (signal.aborted) { toEncode.close(); return; }
-    try { encoder?.encode(toEncode); } finally { toEncode.close(); }
-    encodedCount += 1;
-    opts.onProgress({
-      done: encodedCount,
-      total: extracted.videoSamples.length,
-      phase: 'encoding',
-      unit: 'frames',
-    });
-    if (encodedCount % 2 === 0) await sleep0();
   };
 
   try {
     decoder = new VideoDecoder({
       output: (frame) => {
-        chain = chain.then(() => encodeFrame(frame)).catch((e) => {
-          backgroundError ??= e;
-        });
+        if (failure) { frame.close(); return; }
+        frames.push(frame);
+        draining ??= Promise.resolve().then(drainFrames).catch(fail).finally(() => { draining = undefined; });
       },
-      error: (e) => { backgroundError ??= toolError('DECODE_FAILED', '视频解码失败', String(e)); },
+      error: (e) => fail(toolError('DECODE_FAILED', '视频解码失败', String(e))),
     });
     decoder.configure({
-      codec: extracted.video.codec,
+      codec: decoded.video.codec,
       codedWidth: srcW,
       codedHeight: srcH,
       description: extracted.videoDescription,
@@ -469,13 +477,20 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
     });
 
     encoder = new VideoEncoder({
-      output: (chunk, meta) => muxer!.addVideoChunk(chunk, meta),
-      error: (e) => { backgroundError ??= toolError('ENCODE_FAILED', '视频编码失败', String(e)); },
+      output: (chunk, meta) => {
+        if (failure) return;
+        try { muxer.addVideoChunk(chunk, meta); } catch (error) { fail(error); }
+      },
+      error: (e) => fail(toolError('ENCODE_FAILED', '视频编码失败', String(e))),
     });
     encoder.configure(encoderConfig);
 
+    // Limit submitted decode work as well as the decoded backlog. Do not flush
+    // between batches: the decoder needs to retain reference/reordered frames.
     for (let i = 0; i < extracted.videoSamples.length; i += 1) {
-      if (signal.aborted || backgroundError) break;
+      while (!failure && (decoder.decodeQueueSize + frames.length >= queueLimit ||
+        encoder.encodeQueueSize >= queueLimit)) await sleep0();
+      checkFailure();
       const s = extracted.videoSamples[i]!;
       const { timestamp, duration } = sampleUs(s);
       decoder.decode(new EncodedVideoChunk({
@@ -484,17 +499,15 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
         duration,
         data: s.data,
       }));
-      if (i % 16 === 15) await sleep0();
     }
-    signal.throwIfAborted();
-    if (backgroundError) throw backgroundError;
-    await waitForVideoStep(decoder.flush(), signal);
-    await waitForVideoStep(chain, signal);
-    if (backgroundError) throw backgroundError;
-    await waitForVideoStep(encoder.flush(), signal);
-    signal.throwIfAborted();
-    if (backgroundError) throw backgroundError;
-
+    const flush = async (codec: VideoDecoder | VideoEncoder) => {
+      try { await codec.flush(); } catch (error) { fail(error); }
+      checkFailure();
+    };
+    await flush(decoder);
+    await draining;
+    checkFailure();
+    await flush(encoder);
     // AAC 码流透传：mp4-muxer 会从采样率/声道数生成 AudioSpecificConfig。
     if (keepAudio && addAudio) {
       for (const s of extracted.audioSamples) {
@@ -523,8 +536,10 @@ async function transcodeVideo(file: File, params: VideoTranscodeParams, opts: Ru
       },
     };
   } finally {
-    try { decoder?.close(); } catch { /* 已关闭 */ }
-    try { encoder?.close(); } catch { /* 已关闭 */ }
+    signal.removeEventListener('abort', onAbort);
+    disposeFrames();
+    closeCodecs();
+    await draining;
   }
 }
 
