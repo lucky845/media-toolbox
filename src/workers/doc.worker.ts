@@ -12,6 +12,9 @@ interface DocGlue {
   pdf_merge(inputs: Uint8Array[]): Uint8Array;
   pdf_split(input: Uint8Array, rangesJson: string, selectorJson: string): string;
   pdf_rotate(input: Uint8Array, selectorJson: string, degrees: number): Uint8Array;
+  pdf_reorder(input: Uint8Array, order: Uint32Array): Uint8Array;
+  pdf_encrypt(input: Uint8Array, password: string): Uint8Array;
+  pdf_decrypt(input: Uint8Array, password: string): Uint8Array;
   pdf_extract(input: Uint8Array, selectorJson: string, what: string): string;
   video_build_args(paramsJson: string, input: string, output: string): string;
   video_parse_progress(totalSec: number, line: string): string;
@@ -150,6 +153,18 @@ self.onmessage = async (ev: MessageEvent<ToWorker>) => {
             outputName = 'rotated.pdf';
             break;
           }
+          case 'pdf.reorder':
+            bytes = glue.pdf_reorder(inputs[0]!, Uint32Array.from(payload.order));
+            outputName = 'reordered.pdf';
+            break;
+          case 'pdf.encrypt':
+            bytes = glue.pdf_encrypt(inputs[0]!, payload.password ?? '');
+            outputName = 'encrypted.pdf';
+            break;
+          case 'pdf.decrypt':
+            bytes = glue.pdf_decrypt(inputs[0]!, payload.password ?? '');
+            outputName = 'decrypted.pdf';
+            break;
           case 'pdf.extract': {
             const r = glue.pdf_extract(
               inputs[0]!,

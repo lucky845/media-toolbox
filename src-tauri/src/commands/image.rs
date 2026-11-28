@@ -5,7 +5,7 @@
 //! 20 MP 图如果走 IPC 传 Uint8Array，光序列化就要几百毫秒。
 
 use crate::commands::probe::desktop_limits;
-use media_core::image::params::{EncodeOptions, ImageParams};
+use media_core::image::params::{EncodeOptions, ImageMeta, ImageParams};
 use media_core::image::pipeline::Ctx;
 use media_native::cancel::TaskGuard;
 use media_native::ProgressReporter;
@@ -48,6 +48,18 @@ pub struct ImageProcessArgs {
     /// 可选：覆盖已存在文件
     #[serde(default)]
     pub overwrite: bool,
+}
+
+/// 读取图片元数据，只通过 IPC 返回探测结果。
+#[tauri::command]
+pub async fn image_probe(input_path: String) -> Result<ImageMeta, ToolError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let limits = desktop_limits();
+        let input = read_limited(&input_path, limits.max_bytes)?;
+        media_core::image::pipeline::probe_image(&input, &limits)
+    })
+    .await
+    .map_err(|e| ToolError::internal(format!("Image probe task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -181,4 +193,21 @@ pub fn read_output_preview(path: String) -> Result<Vec<u8>, ToolError> {
 #[tauri::command]
 pub fn write_output_file(path: String, data: Vec<u8>) -> Result<(), ToolError> {
     write_atomic(&path, &data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_image_probe_png_path() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/gradient.png");
+        let meta = tauri::async_runtime::block_on(image_probe(path.to_string_lossy().into_owned()))
+            .expect("PNG should be probed from its native path");
+
+        assert_eq!((meta.width, meta.height), (400, 300));
+        assert_eq!(meta.format, "png");
+        assert_eq!(meta.bytes, std::fs::metadata(path).unwrap().len());
+    }
 }

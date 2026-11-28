@@ -30,6 +30,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::probe::probe_capabilities,
+            commands::image::image_probe,
             commands::image::image_process,
             commands::image::read_output_preview,
             commands::image::write_output_file,

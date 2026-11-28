@@ -50,6 +50,9 @@ export const TASK_LABELS: Record<TaskPayload['kind'], string> = {
   'pdf.merge': 'PDF 合并',
   'pdf.split': 'PDF 拆分',
   'pdf.rotate': 'PDF 旋转',
+  'pdf.reorder': 'PDF 页面重排',
+  'pdf.encrypt': 'PDF 加密',
+  'pdf.decrypt': 'PDF 解密',
   'pdf.extract': 'PDF 提取',
   'office.structure': '文档结构化转换',
   'office.convert': '文档转换',
@@ -61,6 +64,10 @@ export function taskInputs(task: TaskPayload): InputRef[] {
 
 export function isActive(item: QueueItem): boolean {
   return item.status === 'queued' || item.status === 'running';
+}
+
+export function canRetryTask(task: TaskPayload) {
+  return task.kind !== 'pdf.encrypt' && task.kind !== 'pdf.decrypt';
 }
 
 const cancelled: ToolError = { code: 'CANCELLED', message: '任务已取消', retryable: true, desktopHint: false };
@@ -88,7 +95,7 @@ export const useQueue = create<QueueState>((set, get) => {
     if (!job) return;
     // Release the slot and detach page callbacks before publishing the terminal state.
     job.detach?.();
-    if (outcome === 'succeeded') jobs.delete(item.id);
+    if (outcome === 'succeeded' || !canRetryTask(item.task)) jobs.delete(item.id);
     else jobs.set(item.id, { runner: job.runner });
     update(item.id, {
       status: outcome,
@@ -154,6 +161,11 @@ export const useQueue = create<QueueState>((set, get) => {
 
   function add(task: TaskPayload, job: Job = {}) {
     const id = `${session}-${++counter}`;
+    if (task.kind === 'pdf.encrypt' || task.kind === 'pdf.decrypt') {
+      const { password, ...publicTask } = task;
+      job.runner = async (_, options) => (await getBackend()).run({ ...publicTask, password }, options);
+      task = publicTask;
+    }
     const item: QueueItem = { id, task, status: 'queued', progress: null, attempt: 0 };
     const signal = job.observer?.signal;
     const abort = () => get().cancel(id);
@@ -183,7 +195,7 @@ export const useQueue = create<QueueState>((set, get) => {
     },
     retry: (id) => {
       const item = get().items.find((entry) => entry.id === id);
-      if (!item || (item.status !== 'failed' && item.status !== 'cancelled') || item.attempt >= 3) return;
+      if (!item || !canRetryTask(item.task) || (item.status !== 'failed' && item.status !== 'cancelled') || item.attempt >= 3) return;
       jobs.set(id, { runner: jobs.get(id)?.runner });
       update(id, { status: 'queued', attempt: item.attempt + 1, progress: null, error: undefined });
       pump();

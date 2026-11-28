@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-11-27T09:35:02.031Z",
+  "generatedAt": "2026-11-28T01:56:38.578Z",
   "note": "由 scripts/build-wasm.mjs 生成；docs/BUDGET.md 的 [待测] 项以此为准",
   "packages": [
     {
       "pkg": "core_image",
       "feature": "image",
-      "raw": 1208183,
-      "gzip": 428992,
-      "brotli": 333608,
+      "raw": 1208169,
+      "gzip": 429034,
+      "brotli": 333886,
       "optApplied": true
     },
     {
       "pkg": "core_doc",
       "feature": "doc,video,office",
-      "raw": 1897979,
-      "gzip": 743230,
-      "brotli": 573792,
+      "raw": 1915066,
+      "gzip": 751672,
+      "brotli": 580348,
       "optApplied": true
     }
   ]

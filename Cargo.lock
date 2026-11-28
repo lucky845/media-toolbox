@@ -549,6 +549,7 @@ name = "media-core"
 version = "0.2.0"
 dependencies = [
  "blake3",
+ "getrandom",
  "image",
  "kamadak-exif",
  "lopdf",

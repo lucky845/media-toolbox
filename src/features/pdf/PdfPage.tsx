@@ -7,7 +7,7 @@ import { submitTask } from '../../store/queue';
 import { useCapabilities } from '../../store/capabilities';
 import { PdfPreview } from './PdfPreview';
 import { formatBytes, isToolError } from '../../lib/errors';
-import type { InputRef, PageRange, PdfMeta, ToolError } from '../../lib/backend/types';
+import type { InputRef, PageRange, PdfMeta, TaskPayload, ToolError } from '../../lib/backend/types';
 
 function pdfError(error: unknown): ToolError {
   if (isToolError(error)) return error;
@@ -16,13 +16,18 @@ function pdfError(error: unknown): ToolError {
 
 const ACCEPT = '.pdf';
 
-type PdfAction = 'rotate' | 'split' | 'extractPages' | 'extractText' | 'extractImages' | 'merge' | 'render';
+type PdfAction = 'rotate' | 'split' | 'extractPages' | 'extractText' | 'extractImages' | 'merge' | 'render' | 'reorder' | 'encrypt' | 'decrypt';
 
 export function PdfPage({ action }: { action: PdfAction }) {
   const [files, setFiles] = useState<InputRef[]>([]);
   const [meta, setMeta] = useState<PdfMeta | null>(null);
 
   const [runAction, setRunAction] = useState<PdfAction | null>(null);
+  const [password, setPassword] = useState('');
+  const [order, setOrder] = useState<number[]>([]);
+  const passwordAction = action === 'encrypt' || action === 'decrypt';
+  const useRanges = action === 'rotate' || action === 'split' || action.startsWith('extract');
+  const multiple = action === 'merge' || action === 'render' || passwordAction;
   const [degrees, setDegrees] = useState(90);
   const [rangeText, setRangeText] = useState('');
   const [error, setError] = useState<ToolError | null>(null);
@@ -38,6 +43,8 @@ export function PdfPage({ action }: { action: PdfAction }) {
   const onFiles = useCallback(async (refs: InputRef[]) => {
     const version = ++selectionVersion.current;
     setRunAction(null);
+    setOrder([]);
+    setPassword('');
     setError(null);
     setMeta(null);
     setResult(null);
@@ -51,7 +58,10 @@ export function PdfPage({ action }: { action: PdfAction }) {
       const backend = await getBackend();
       if (!backend.probePdf) throw new Error('当前后端不支持 PDF 探测');
       const nextMeta = await backend.probePdf(first);
-      if (version === selectionVersion.current) setMeta(nextMeta);
+      if (version === selectionVersion.current) {
+        setMeta(nextMeta);
+        setOrder(Array.from({ length: nextMeta.pages }, (_, index) => index + 1));
+      }
     } catch (e) {
       if (version === selectionVersion.current) setError(pdfError(e));
     } finally {
@@ -71,17 +81,17 @@ export function PdfPage({ action }: { action: PdfAction }) {
 
   const pick = useCallback(async () => {
     try {
-      const refs = await (await getBackend()).pickFiles(ACCEPT, true);
+      const refs = await (await getBackend()).pickFiles(ACCEPT, multiple);
       if (refs.length) await onFiles(refs);
     } catch (e) {
       setError(pdfError(e));
     }
-  }, [onFiles]);
+  }, [onFiles, multiple]);
 
   const first = files[0];
   const [localPreview, setLocalPreview] = useState<{ input: InputRef; file: File }>();
   useEffect(() => {
-    if (action !== 'render' || !first?.path || !meta || meta.encrypted) return;
+    if ((action !== 'render' && action !== 'reorder') || !first?.path || !meta || meta.encrypted) return;
     let current = true;
     setLocalPreview(undefined);
     void (async () => {
@@ -97,6 +107,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
     return () => { current = false; };
   }, [action, first, meta]);
   const previewFile = first?.file ?? (localPreview?.input === first ? localPreview?.file : undefined);
+  const previewBatch = action === 'render' && files.length > 1 ? files : undefined;
 
   const parseRanges = (): PageRange[] | null => {
     if (!rangeText.trim()) return action === 'split' ? null : [];
@@ -127,15 +138,22 @@ export function PdfPage({ action }: { action: PdfAction }) {
 
   const outputFileName = files[0]?.name.replace(/\.pdf$/i, '') || 'document';
 
+  const passwordValid = action === 'decrypt'
+    || (password.trim().length > 0 && new TextEncoder().encode(password).length <= 127);
+  const canRun = !!meta && !busy && !probing && action !== 'render'
+    && (passwordAction ? passwordValid && (files.length > 1 || meta.encrypted === (action === 'decrypt')) : !meta.encrypted)
+    && (action !== 'merge' || files.length > 1)
+    && (action !== 'reorder' || order.some((page, index) => page !== index + 1));
+
   async function run() {
-    if (!files[0] || !meta || meta.encrypted || busy || probing || action === 'render') return;
+    if (!files[0] || !canRun) return;
     setRunAction(action);
     setOutputStatus('');
     setBusy(true);
     setError(null);
     setResult(null);
     setExtracted(null);
-    const ranges = action === 'merge' ? [] : parseRanges();
+    const ranges = useRanges ? parseRanges() : [];
     if (!ranges) {
       setError({ code: 'INVALID_PARAMS', message: '页码范围无效，请使用如 1-3,5 的格式，并且不能超过 PDF 页数', retryable: false, desktopHint: false });
       setBusy(false);
@@ -143,8 +161,16 @@ export function PdfPage({ action }: { action: PdfAction }) {
     }
     const selector = { ranges, oddOnly: false, evenOnly: false };
 
-    let task;
+    let task: TaskPayload;
     switch (action) {
+      case 'reorder':
+        task = { kind: 'pdf.reorder', input: files[0], order };
+        break;
+      case 'encrypt':
+      case 'decrypt':
+        task = { kind: action === 'encrypt' ? 'pdf.encrypt' : 'pdf.decrypt', input: files[0], password };
+        setPassword('');
+        break;
       case 'rotate':
         task = { kind: 'pdf.rotate' as const, input: files[0]!, pages: selector, degrees };
         break;
@@ -171,7 +197,22 @@ export function PdfPage({ action }: { action: PdfAction }) {
     }
 
     try {
-      const out = await submitTask(task!);
+      if ((task.kind === 'pdf.encrypt' || task.kind === 'pdf.decrypt') && files.length > 1) {
+        const operation = task;
+        const backend = await getBackend();
+        const results = await Promise.allSettled(files.map(async (input, index) => {
+          const out = await submitTask({ ...operation, input });
+          if (!out.savedOutputs) {
+            const stem = input.name.replace(/\.pdf$/i, '');
+            await backend.saveOutput(out.bytes, `${stem}-${index + 1}-${out.outputName}`, { directDownload: true });
+          }
+        }));
+        const failures = results.flatMap((entry, index) => entry.status === 'rejected'
+          ? [`${files[index]?.name}：${pdfError(entry.reason).message}`] : []);
+        setResult(`已处理 ${files.length - failures.length} / ${files.length} 份 PDF${failures.length ? `。${failures.join('；')}` : ''}`);
+        return;
+      }
+      const out = await submitTask(task);
       if (action === 'extractText') {
         const textBytes = out.text ? new TextEncoder().encode(out.text) : out.bytes;
         setExtracted(textBytes);
@@ -211,7 +252,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
           onFiles={(items) => void onFiles(items.map((file) => ({ file, name: file.name, size: file.size })))}
           onNativeFiles={nativePicker ? onFiles : undefined}
           onPick={pick}
-          multiple
+          multiple={multiple}
           disabled={busy}
         />
         {action === 'merge' && files.length > 1 && (
@@ -232,7 +273,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
           <dl className="kv" style={{ marginTop: 12 }}>
             <dt>页数</dt><dd className="mono">{meta.pages}</dd>
             <dt>大小</dt><dd className="mono">{formatBytes(meta.bytes)}</dd>
-            <dt>加密</dt><dd>{meta.encrypted ? '是（暂不支持处理）' : '否'}</dd>
+            <dt>加密</dt><dd>{meta.encrypted ? '是' : '否'}</dd>
             <dt>版本</dt><dd className="mono">{meta.version}</dd>
           </dl>
         )}
@@ -241,7 +282,19 @@ export function PdfPage({ action }: { action: PdfAction }) {
       <div className="card">
         <h2>{action === 'render' ? '渲染设置' : '处理设置'}</h2>
 
-        {action !== 'merge' && action !== 'render' && (
+        {passwordAction && (
+          <label className="row" style={{ gap: 8 }}>
+            <span>打开密码</span>
+            <input type="password" autoComplete={action === 'encrypt' ? 'new-password' : 'off'}
+              value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} />
+            <span className="hint">{action === 'encrypt' ? 'AES-256，最多 127 字节' : '仅限制编辑、打开时无需密码的 PDF 可留空'}</span>
+          </label>
+        )}
+        {files.length > 1 && action !== 'merge' && (
+          <ul aria-label="批处理文件">{files.map((file, index) => <li key={index}>{file.name}</li>)}</ul>
+        )}
+        {meta?.encrypted && !passwordAction && <p className="hint">请先使用「移除密码」解密此文件。</p>}
+        {useRanges && (
           <div className="row" style={{ marginTop: 14, gap: 14 }}>
             <label className="row" style={{ gap: 8 }}>
               <span className="hint">页码范围</span>
@@ -267,7 +320,7 @@ export function PdfPage({ action }: { action: PdfAction }) {
 
         {action !== 'render' && (
           <div className="row" style={{ marginTop: 16 }}>
-            <button className="primary" onClick={run} disabled={!meta || meta.encrypted || busy || probing || (action === 'merge' && files.length < 2)}>
+            <button className="primary" onClick={run} disabled={!canRun}>
               {busy ? '处理中…' : '执行'}
             </button>
           </div>
@@ -279,8 +332,10 @@ export function PdfPage({ action }: { action: PdfAction }) {
         )}
       </div>
 
-      {action === 'render' && previewFile && meta && !meta.encrypted && (
-        <PdfPreview file={previewFile} pageCount={meta.pages} onError={setError} />
+      {(action === 'render' || action === 'reorder') && previewFile && meta && !meta.encrypted && (
+        <PdfPreview key={selectionVersion.current} file={previewFile} pageCount={meta.pages} onError={setError}
+          reorder={action === 'reorder' ? { order, setOrder, disabled: busy } : undefined}
+          batch={previewBatch} />
       )}
       {action === 'render' && !previewFile && !error && !meta?.encrypted && (
         <div className="card"><span className="hint">{first ? '正在读取 PDF…' : '请选择 PDF 文件'}</span></div>

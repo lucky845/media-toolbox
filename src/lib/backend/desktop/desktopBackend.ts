@@ -15,6 +15,7 @@ import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialo
 import type {
   Backend,
   Capabilities,
+  ImageMeta,
   ImageResultMeta,
   InputRef,
   PdfMeta,
@@ -150,7 +151,8 @@ export class DesktopBackend implements Backend {
         };
       }
 
-      if (task.kind === 'pdf.merge' || task.kind === 'pdf.split' || task.kind === 'pdf.rotate' || task.kind === 'pdf.extract') {
+      if (task.kind === 'pdf.merge' || task.kind === 'pdf.split' || task.kind === 'pdf.rotate' || task.kind === 'pdf.extract' || task.kind === 'pdf.reorder' ||
+      task.kind === 'pdf.encrypt' || task.kind === 'pdf.decrypt') {
         const requirePath = (ref: InputRef) => {
           if (ref.path) return ref.path;
           throw { code: 'INVALID_PARAMS', message: '桌面端 PDF 操作需要文件路径', retryable: false, desktopHint: false } satisfies ToolError;
@@ -265,6 +267,19 @@ export class DesktopBackend implements Backend {
   async probePdf(ref: InputRef): Promise<PdfMeta> {
     if (!ref.path) throw { code: 'INVALID_PARAMS', message: '桌面端 PDF 探测需要文件路径', retryable: false, desktopHint: false } satisfies ToolError;
     return invoke('pdf_probe', { inputPath: ref.path });
+  }
+
+  /** 图片探测：桌面读取路径，Rust 只返回元数据。 */
+  async probe(ref: InputRef): Promise<ImageMeta> {
+    if (!ref.path) {
+      throw {
+        code: 'INVALID_PARAMS',
+        message: '桌面端图片探测需要文件路径',
+        retryable: false,
+        desktopHint: false,
+      } satisfies ToolError;
+    }
+    return invoke('image_probe', { inputPath: ref.path });
   }
 
   /** 视频探测：桌面走 ffprobe command（只解元数据） */

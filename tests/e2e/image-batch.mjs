@@ -33,15 +33,16 @@ try {
   await run.click();
   await page.waitForFunction(() => document.querySelectorAll('.task.succeeded').length === 2 && document.querySelectorAll('.task.failed').length === 1);
 
-  async function download(task) {
+  async function download(task, extension) {
     const [file] = await Promise.all([
       page.waitForEvent('download'),
       task.getByRole('button', { name: '保存', exact: true }).click(),
     ]);
+    assert.equal(file.suggestedFilename().split('.').pop(), extension);
     return readFile(await file.path());
   }
 
-  const qoi = await download(page.locator('.task.succeeded').first());
+  const qoi = await download(page.locator('.task.succeeded').first(), 'qoi');
   assert.equal(qoi.toString('ascii', 0, 4), 'qoif');
   assert.equal(qoi.readUInt32BE(4), 300);
   assert.equal(qoi.readUInt32BE(8), 320); // 400px × 80% crop width
@@ -50,7 +51,7 @@ try {
   await format.selectOption('ico');
   await page.getByLabel(/缩放/).fill('50');
   await page.getByRole('button', { name: '开始处理' }).click();
-  const ico = await download(page.locator('.task.succeeded').filter({ hasText: 'converted.qoi' }));
+  const ico = await download(page.locator('.task.succeeded').filter({ hasText: 'converted.qoi' }), 'ico');
   assert.deepEqual([...ico.subarray(0, 8)], [0, 0, 1, 0, 1, 0, 160, 120]); // crop 80% then scale 50%
   await format.selectOption('jpeg');
   await page.getByLabel(/^预设/).selectOption('compact');

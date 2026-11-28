@@ -19,10 +19,15 @@ try {
 
   await page.goto(`${base}/#/pdf`, { waitUntil: 'networkidle' });
   const picker = page.locator('input[type="file"]');
+  const upload = page.getByRole('link', { name: '合并', exact: true });
+  async function uploadFiles(files) {
+    if (files.length > 1) await upload.click();
+    await picker.setInputFiles(files);
+  }
   const pageCount = page.locator('dl.kv dd').first();
   async function uploadAndProbe(files) {
     await pageCount.waitFor({ state: 'hidden' });
-    await picker.setInputFiles(files);
+    await uploadFiles(Array.isArray(files) ? files : [files]);
     await pageCount.waitFor({ state: 'visible', timeout: 30_000 });
     return Number(await pageCount.innerText());
   }
@@ -41,8 +46,8 @@ try {
   await page.getByText(/已生成 rotated\.pdf/).waitFor();
 
   await page.reload();
-  await uploadAndProbe([pdf('first.pdf'), pdf('second.pdf', secondFixture)]);
   await page.getByRole('link', { name: '合并', exact: true }).click();
+  await uploadAndProbe([pdf('first.pdf'), pdf('second.pdf', secondFixture)]);
   const downloadDone = page.waitForEvent('download', { timeout: 40_000 });
   await execute.click();
   const download = await downloadDone;

@@ -4,33 +4,36 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBackend } from '../../lib/backend';
-import { getPdfRenderBackend } from '../../lib/backend/web/pdfRenderBackend';
+import { getPdfRenderBackend, PdfRenderBackend } from '../../lib/backend/web/pdfRenderBackend';
 import { submitTask } from '../../store/queue';
 import { useCapabilities } from '../../store/capabilities';
-import type { PageRange, ToolError } from '../../lib/backend/types';
+import type { InputRef, PageRange, ToolError } from '../../lib/backend/types';
 
 interface PdfPreviewProps {
   file: File;
   pageCount: number;
+  batch?: InputRef[];
+  reorder?: { order: number[]; setOrder: (order: number[]) => void; disabled: boolean };
   onError: (error: ToolError) => void;
 }
 
 const LOCAL_MAX_BITMAPS = 12;
 
 function parseRanges(text: string, pageCount: number): PageRange[] {
-  return text
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => {
-      const [a, b] = s.split('-').map((x) => parseInt(x.trim(), 10));
-      const from = Math.max(1, Math.min(pageCount, a ?? 1));
-      const to = Math.max(from, Math.min(pageCount, b ?? a ?? 1));
-      return { from, toInclusive: to };
-    });
+  if (!text.trim()) return [{ from: 1, toInclusive: pageCount }];
+  const ranges: PageRange[] = [];
+  for (const part of text.split(',')) {
+    const match = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(part.trim());
+    if (!match) return [];
+    const from = Number(match[1]);
+    const toInclusive = Number(match[2] ?? match[1]);
+    if (from < 1 || toInclusive < from || !Number.isSafeInteger(toInclusive)) return [];
+    ranges.push({ from, toInclusive });
+  }
+  return ranges;
 }
 
-export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
+export function PdfPreview({ file, pageCount, onError, reorder, batch }: PdfPreviewProps) {
   // 阈值来自 capabilities，不在渲染层/UI 硬编码（规格 D10）。
   const { caps } = useCapabilities();
   const maxPages = caps?.pdf.maxPages ?? 100;
@@ -45,6 +48,15 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const draggedPage = useRef<number | null>(null);
+  function movePage(from: number, to: number) {
+    if (!reorder || reorder.disabled || from === to || from < 0 || to < 0 || to >= reorder.order.length) return;
+    const next = [...reorder.order];
+    const [page] = next.splice(from, 1);
+    next.splice(to, 0, page!);
+    reorder.setOrder(next);
+  }
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
@@ -157,37 +169,60 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
     setProgress(null);
     setNotice(null);
     try {
-      const task = {
-        kind: 'pdf.render' as const,
-        input: { file, name: file.name, size: file.size },
-        params: { dpi, pages: ranges, format, quality, background: '#ffffff', longImage },
-      };
-      const out = await submitTask(task, {
-        onProgress: ({ done, total }) => setProgress({ done, total }),
-      }, (payload, options) => {
-        if (payload.kind !== 'pdf.render' || !payload.input.file) throw new Error('Expected PDF render file');
-        return getPdfRenderBackend().render(payload.input.file, payload.params, options, options.signal, maxPages);
-      });
       const backend = await getBackend();
-      const outputs = out.outputs?.length ? out.outputs : [{ bytes: out.bytes, name: out.outputName }];
-      let saved = 0;
-      for (const item of outputs) {
-        if (await backend.saveOutput(item.bytes, item.name, { directDownload: true }) !== 'cancelled') saved++;
-      }
-      if (saved) setNotice(`已导出 ${saved} / ${outputs.length} 张图片`);
+      const sources = batch ?? [{ file, name: file.name, size: file.size }];
+      const outcomes = await Promise.allSettled(sources.map(async (input, index) => {
+        const out = await submitTask({
+          kind: 'pdf.render', input,
+          params: { dpi, pages: rangeText.trim() ? ranges : [], format, quality, background: '#ffffff', longImage },
+        }, batch ? undefined : { onProgress: ({ done, total }) => setProgress({ done, total }) }, async (payload, options) => {
+          if (payload.kind !== 'pdf.render') throw new Error('Expected PDF render task');
+          const source = payload.input.file ?? (backend.readPdf
+            ? new File([await backend.readPdf(payload.input)], payload.input.name, { type: 'application/pdf' })
+            : undefined);
+          if (!source) throw new Error('无法读取 PDF');
+          // Each queued export owns its document/cache, independent of preview and other jobs.
+          const renderer = new PdfRenderBackend();
+          let result;
+          try {
+            result = await renderer.render(source, payload.params, options, options.signal, maxPages);
+          } finally {
+            renderer.dispose();
+          }
+          if (!batch) return result;
+          const stem = input.name.replace(/\.pdf$/i, '');
+          const nameOutput = (name: string) => `${stem}-${index + 1}-${name}`;
+          return { ...result, outputName: nameOutput(result.outputName), outputs: result.outputs?.map((output) => ({
+            ...output, name: nameOutput(output.name),
+          })) };
+        });
+        const outputs = out.outputs?.length ? out.outputs : [{ bytes: out.bytes, name: out.outputName }];
+        let saved = 0;
+        for (const item of outputs) {
+          if (await backend.saveOutput(item.bytes, item.name, { directDownload: true }) !== 'cancelled') saved++;
+        }
+        return { saved, total: outputs.length };
+      }));
+      const failures = outcomes.flatMap((outcome, index) => outcome.status === 'rejected'
+        ? [`${sources[index]?.name}：${outcome.reason?.message ?? String(outcome.reason)}`] : []);
+      if (!batch && outcomes[0]?.status === 'rejected') throw outcomes[0].reason;
+      const totals = outcomes.reduce((sum, outcome) => outcome.status === 'fulfilled'
+        ? { saved: sum.saved + outcome.value.saved, total: sum.total + outcome.value.total } : sum, { saved: 0, total: 0 });
+      setNotice(`已导出 ${totals.saved} / ${totals.total} 张图片${failures.length ? `。${failures.join('；')}` : ''}`);
     } catch (e) {
       onErrorRef.current(e as ToolError);
     } finally {
       setBusy(false);
       setProgress(null);
     }
-  }, [file, pageCount, dpi, format, quality, rangeText, longImage]);
+  }, [file, pageCount, dpi, format, quality, rangeText, longImage, batch, maxPages]);
 
-  const pageNumbers = Array.from({ length: pageCount }, (_, i) => i + 1);
+  const pageNumbers = reorder?.order ?? Array.from({ length: pageCount }, (_, i) => i + 1);
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
-      <h2>页面预览与图片导出</h2>
+      <h2>{reorder ? '拖动缩略图调整顺序' : '页面预览与图片导出'}</h2>
+      {!reorder && <>
       <div className="row" style={{ gap: 14, flexWrap: 'wrap' }}>
         <label className="row" style={{ gap: 8 }}>
           <span className="hint">DPI</span>
@@ -214,7 +249,7 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
         )}
         <label className="row" style={{ gap: 8 }}>
           <span className="hint">导出范围</span>
-          <input type="text" value={rangeText} onChange={(e) => setRangeText(e.target.value)} style={{ width: 140 }} disabled={busy} />
+          <input type="text" value={rangeText} placeholder="留空导出全部" onChange={(e) => setRangeText(e.target.value)} style={{ width: 140 }} disabled={busy} />
         </label>
         <label className="row" style={{ gap: 8 }}>
           <input type="checkbox" checked={longImage} onChange={(e) => setLongImage(e.target.checked)} disabled={busy} />
@@ -224,13 +259,15 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
 
       <div className="row" style={{ marginTop: 12, gap: 10 }}>
         <button className="primary" onClick={() => void exportImages()} disabled={busy}>
-          {busy ? (progress ? `导出中 ${progress.done}/${progress.total}…` : '导出中…') : '导出为图片'}
+          {busy ? (progress ? `导出中 ${progress.done}/${progress.total}…` : '导出中…') : batch ? `批量导出 ${batch.length} 份 PDF` : '导出为图片'}
         </button>
         <span className="hint">仅渲染视口附近的页；导出范围{maxPages > 0 ? `最多 ${maxPages} 页` : '不限页数'}</span>
       </div>
       {notice && <div className="notice info" style={{ marginTop: 10 }}><span>✓</span><div>{notice}</div></div>}
 
+      </>}
       <div
+        aria-label={reorder ? '页面顺序' : undefined}
         ref={rootRef}
         style={{
           marginTop: 14,
@@ -239,19 +276,40 @@ export function PdfPreview({ file, pageCount, onError }: PdfPreviewProps) {
           border: '1px solid var(--line)',
           background: '#0a1014',
           padding: 12,
-          display: 'flex',
+          display: reorder ? 'grid' : 'flex',
+          gridTemplateColumns: reorder ? 'repeat(auto-fit, minmax(140px, 1fr))' : undefined,
           flexDirection: 'column',
           alignItems: 'center',
           gap: 12,
         }}
       >
-        {pageNumbers.map((n) => (
+        {pageNumbers.map((n, index) => (
           <div
             key={n}
             data-page={n}
+            draggable={!!reorder && !reorder.disabled}
+            onDragStart={reorder ? (event) => {
+              draggedPage.current = n;
+              event.dataTransfer.setData('text/plain', String(n));
+              event.dataTransfer.effectAllowed = 'move';
+            } : undefined}
+            onDragEnd={reorder ? () => { draggedPage.current = null; } : undefined}
+            onDragOver={reorder ? (event) => { if (draggedPage.current !== null) event.preventDefault(); } : undefined}
+            onDrop={reorder ? (event) => {
+              if (draggedPage.current === null) return;
+              event.preventDefault();
+              movePage(pageNumbers.indexOf(draggedPage.current), index);
+              draggedPage.current = null;
+            } : undefined}
             style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
           >
-            <span className="hint mono" style={{ fontSize: 11 }}>PAGE {String(n).padStart(3, '0')}</span>
+            <span className="hint mono" style={{ fontSize: 11 }}>{reorder ? `第 ${index + 1} 项 · 原第 ${n} 页` : `PAGE ${String(n).padStart(3, '0')}`}</span>
+            {reorder && <div className="row" style={{ gap: 4 }}>
+              <button type="button" disabled={reorder.disabled || index === 0}
+                aria-label={`前移原第 ${n} 页`} onClick={() => movePage(index, index - 1)}>前移</button>
+              <button type="button" disabled={reorder.disabled || index === pageNumbers.length - 1}
+                aria-label={`后移原第 ${n} 页`} onClick={() => movePage(index, index + 1)}>后移</button>
+            </div>}
             <canvas
               ref={setCanvasRef(n)}
               style={{

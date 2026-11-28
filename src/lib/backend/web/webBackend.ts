@@ -18,7 +18,6 @@ import {
 import type {
   Capabilities,
   ImageMeta,
-  ImageResultMeta,
   InputRef,
   PdfMeta,
   Limits,
@@ -45,9 +44,6 @@ interface PendingTask {
   reject: (e: ToolError) => void;
   onProgress: (p: Progress) => void;
   onLog?: (e: LogEntry) => void;
-  chunks: Uint8Array[];
-  meta?: ImageResultMeta;
-  outputName?: string;
   settled: boolean;
 }
 
@@ -211,16 +207,20 @@ export class WebBackend implements Backend_ {
         const p = this.pending.get(m.taskId);
         if (!p || p.settled) return;
         p.settled = true;
-        p.meta = m.meta;
-        const bytes = new Uint8Array(m.output);
-        // outputName 由 worker 通过 log 消息送来；若没到就用兜底名
-        p.chunks.push(bytes);
         this.pending.delete(m.taskId);
-        const merged = concat(p.chunks);
+        if (!m.outputName) {
+          p.reject({
+            code: 'INTERNAL',
+            message: '图片处理结果缺少输出文件名',
+            retryable: true,
+            desktopHint: false,
+          });
+          return;
+        }
         p.resolve({
-          bytes: merged,
+          bytes: new Uint8Array(m.output),
           meta: m.meta,
-          outputName: p.outputName ?? 'output',
+          outputName: m.outputName,
         });
         return;
       }
@@ -261,9 +261,6 @@ export class WebBackend implements Backend_ {
           return;
         }
         const p = this.pending.get(m.taskId);
-        if (m.message.startsWith('outputName=')) {
-          if (p) p.outputName = m.message.slice('outputName='.length);
-        }
         if (p && p.onLog) {
           p.onLog({ level: m.level, message: m.message, at: Date.now() });
         }
@@ -371,7 +368,8 @@ export class WebBackend implements Backend_ {
     // PDF 结构操作：委托给专用后端（它内部是 core_doc wasm worker）。
     if (
       task.kind === 'pdf.merge' || task.kind === 'pdf.split' ||
-      task.kind === 'pdf.rotate' || task.kind === 'pdf.extract'
+      task.kind === 'pdf.rotate' || task.kind === 'pdf.extract' || task.kind === 'pdf.reorder' ||
+      task.kind === 'pdf.encrypt' || task.kind === 'pdf.decrypt'
     ) {
       return getDocBackend().run(task, opts);
     }
@@ -417,7 +415,6 @@ export class WebBackend implements Backend_ {
         reject,
         onProgress: opts.onProgress,
         onLog: opts.onLog,
-        chunks: [],
         settled: false,
       };
       this.pending.set(opts.taskId, p);
@@ -608,19 +605,6 @@ export class WebBackend implements Backend_ {
   dispose(): void {
     this.stopWorker({ code: 'CANCELLED', message: '后端已释放', retryable: false, desktopHint: false });
   }
-}
-
-/** 拼接多个 Uint8Array（多数情况下只有一个） */
-function concat(chunks: Uint8Array[]): Uint8Array {
-  if (chunks.length === 1) return chunks[0]!;
-  const total = chunks.reduce((n, c) => n + c.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.length;
-  }
-  return out;
 }
 
 // 避免循环依赖：Backend 类型在 types.ts，这里只是实现
