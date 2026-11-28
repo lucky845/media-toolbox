@@ -226,7 +226,10 @@ pub fn run_capture_with_cancel(
     if !status.success() {
         return Err(ToolError::new(
             ErrorCode::EncodeFailed,
-            &[("detail", &format!("命令退出码 {}", status.code().unwrap_or(-1)))],
+            &[(
+                "detail",
+                &format!("命令退出码 {}", status.code().unwrap_or(-1)),
+            )],
         ));
     }
     Ok(())
